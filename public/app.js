@@ -246,6 +246,7 @@ const FX = {
       else if (/ 콜 /.test(line)) { const amt = +(line.match(/(\d+)$/) || [0, 0])[1]; Sfx.chips(Math.min(10, 2 + Math.round(amt / g.bb / 3))); }
       else if (/체크/.test(line)) this.sfx('check');
       else if (/다이/.test(line)) { this.sfx('fold'); if (line.startsWith(me.name + ' ')) this.flash('rgba(0,0,0,.9)'); }
+      else if (/올인 — 남은 카드 공개/.test(line)) { this.stamp('카드 오픈', 'var(--bone)'); Sfx.drumroll(0, 0.9, 0.3); Sfx.sting(45, 0.2); for (let k = 0; k < 6; k++) Sfx.flip(0.1 + k * 0.08, 0.25); }
       else if (/승리/.test(line)) {
         const winners = g.result?.winners || [];
         const iWon = winners.some((w) => w.id === me.id);
@@ -667,7 +668,7 @@ const Duel = {
     FX.tense(true);
     const STEP = Poker.DUEL_STEP;
     for (let i = 1; i <= d.depth; i++) {
-      const at = 1300 + (i - 1) * STEP;
+      const at = Poker.DUEL_INTRO + (i - 1) * STEP;
       const row = el.querySelector(`.drow[data-i="${i}"]`);
       const decided = !d.tie && i === d.depth;
       Sfx.drumroll((at - 520) / 1000, 0.5, decided ? 0.35 : 0.22);
@@ -689,7 +690,7 @@ const Duel = {
       FX.tense(false);
       if (d.tie) { el.classList.add('tie'); Sfx.bwomp(0); Sfx.stab([60, 65, 67], 0.1, 0.8, 0.12); }
       else el.querySelector('.dside.R').classList.add('lose');
-    }, 1300 + d.depth * STEP);
+    }, Poker.DUEL_INTRO + d.depth * STEP);
     this.later(() => (el.hidden = true), Poker.duelMs(g));
     return Poker.duelMs(g);
   },
@@ -705,7 +706,7 @@ function cardHTML(c, size = '', extra = '') {
 const STREET_KO = { waiting: '대기 중', preflop: '프리플랍', flop: '플랍 (2장)', turn: '턴 (3장)', fourth: '포스 (4장)', river: '리버 (5장)', showdown: '쇼다운' };
 const fmt = (n) => n.toLocaleString('en-US');
 
-const REVEAL_PER = 1.3; // seconds the camera spends on each revealed hand
+const REVEAL_PER = 0.85; // seconds the camera spends on each revealed hand
 const RANK_KO = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10' };
 const rankName = (v) => RANK_KO[v] || String(v);
 
@@ -904,6 +905,7 @@ function renderActions(ctx) {
     let msg = '';
     if (g.street === 'waiting') msg = ctx.waitingMsg || '게임 시작 대기 중…';
     else if (g.street === 'showdown') msg = ctx.showdownMsg || '다음 핸드 준비 중…';
+    else if (g.runout) msg = '올인 — 카드 공개 중…';
     else if (me && !me.inHand) msg = '다음 핸드부터 참가합니다';
     else if (me?.folded) msg = '다이했습니다';
     else if (me?.allIn) msg = '올인!';
@@ -1013,6 +1015,7 @@ const Practice = {
     renderTable(ctx);
     if (Poker.isLive(g)) {
       const p = g.players[g.toAct];
+      if (g.runout) { this.timer = setTimeout(() => { Poker.runoutStep(g); this.tick(); }, 1300); return; }
       if (p.bot) { const d = Poker.botDecide(g, p.id); this.timer = setTimeout(() => { Poker.applyAction(g, p.id, d); this.tick(); }, d.think); }
       return;
     }
@@ -1048,7 +1051,7 @@ const Practice = {
         return modal('<h2>🏆 우승!</h2><p>모든 봇을 이겼습니다!</p>', [['메뉴로', 'orange', () => show('menu')]]);
       }
       const reveal = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 : 0;
-      this.timer = setTimeout(() => this.next(), 5000 + reveal + Poker.celebMs(g) + Poker.duelMs(g) + (bustedIn(g).length ? EXEC_MS : 0));
+      this.timer = setTimeout(() => this.next(), 2800 + reveal + Poker.celebMs(g) + Poker.duelMs(g) + (bustedIn(g).length ? EXEC_MS : 0));
     }
   },
   next() {

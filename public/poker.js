@@ -223,6 +223,7 @@
     if (seated.length < 2) return false;
 
     g.handNo++;
+    g.runout = false;
     g.deck = newDeck();
     g.board = [];
     g.pot = 0;
@@ -343,24 +344,38 @@
   }
 
   function endRound(g) {
-    for (;;) {
-      for (const p of g.players) { g.pot += p.bet; p.bet = 0; p.acted = false; p.actedSeq = 0; }
-      g.fullRaiseSeq = 1;
-      g.currentBet = 0;
-      g.minRaise = g.bb;
-      g.aggressor = null;
-      if (g.street === 'river') return showdown(g);
-      if (g.street === 'preflop') { g.board.push(g.deck.pop(), g.deck.pop()); g.street = 'flop'; }
-      else if (g.street === 'flop') { g.board.push(g.deck.pop()); g.street = 'turn'; }
-      else if (g.street === 'turn') { g.board.push(g.deck.pop()); g.street = 'fourth'; }
-      else if (g.street === 'fourth') { g.board.push(g.deck.pop()); g.street = 'river'; }
-      for (const p of g.players) if (canAct(p) && p.lastAction !== '올인') p.lastAction = '';
-      if (g.players.filter(canAct).length >= 2) {
-        g.toAct = nextIdx(g, g.dealer, canAct);
-        return;
-      }
-      // nobody (or only one player) can still bet: run out the board
+    for (const p of g.players) { g.pot += p.bet; p.bet = 0; p.acted = false; p.actedSeq = 0; }
+    g.fullRaiseSeq = 1;
+    g.currentBet = 0;
+    g.minRaise = g.bb;
+    g.aggressor = null;
+    if (g.street === 'river') return showdown(g);
+    dealNext(g);
+    if (g.players.filter(canAct).length >= 2) {
+      g.toAct = nextIdx(g, g.dealer, canAct);
+      return;
     }
+    // Nobody can bet any more (all-in): hands are turned face up and the rest of the
+    // board is dealt one street at a time by whoever hosts the game (runoutStep).
+    g.runout = true;
+    g.toAct = -1;
+    log(g, '올인 — 남은 카드 공개');
+  }
+
+  function dealNext(g) {
+    if (g.street === 'preflop') { g.board.push(g.deck.pop(), g.deck.pop()); g.street = 'flop'; }
+    else if (g.street === 'flop') { g.board.push(g.deck.pop()); g.street = 'turn'; }
+    else if (g.street === 'turn') { g.board.push(g.deck.pop()); g.street = 'fourth'; }
+    else if (g.street === 'fourth') { g.board.push(g.deck.pop()); g.street = 'river'; }
+    for (const p of g.players) if (canAct(p) && p.lastAction !== '올인') p.lastAction = '';
+  }
+
+  // Deal the next street of an all-in runout; the last call goes to showdown.
+  function runoutStep(g) {
+    if (!g.runout) return false;
+    if (g.street === 'river') { g.runout = false; showdown(g); }
+    else dealNext(g);
+    return true;
   }
 
   function finishUncontested(g, w) {
@@ -480,7 +495,8 @@
   function viewFor(g, id) {
     const v = JSON.parse(JSON.stringify(g));
     delete v.deck;
-    const reveal = g.street === 'showdown' && g.result && !g.result.uncontested;
+    // all-in hands are tabled during the runout, like at a real table
+    const reveal = (g.street === 'showdown' && g.result && !g.result.uncontested) || g.runout;
     for (const p of v.players) {
       if (p.id === id) continue;
       if (reveal && p.inHand && !p.folded) continue;
@@ -609,12 +625,12 @@
         d = { type: 'call', think: tank(), say: read > 0.04 && effEq - read < need ? pick(LINES.hero) : talk('call', 0.3) };
       } else d = { type: 'fold', say: talk('fold', 0.35), think: tank() };
     }
-    d.think = Math.round(clamp(d.think, 300, 6000));
+    d.think = Math.round(clamp(d.think * 0.55, 250, 3200));
     return d;
   }
 
   // How long the client's result celebration runs for each tier (high card .. royal flush)
-  const CELEB_MS = [1000, 2300, 2700, 3100, 3500, 3900, 4400, 5200, 6000, 8600];
+  const CELEB_MS = [800, 1900, 2300, 2700, 3200, 3700, 4200, 5000, 5800, 8400];
   function celebTier(score) { return score[0] === 8 && score[1] === 14 ? 9 : score[0]; }
   function bestWin(g) {
     if (!g.result || g.result.uncontested) return null;
@@ -637,10 +653,10 @@
     const tie = depth >= ws.length;
     return { wid: b.w.id, lid: rid, depth: Math.min(depth, ws.length - 1), steps: ws.length - 1, tie };
   }
-  const DUEL_STEP = 750;
-  const duelMs = (g) => { const d = duelInfo(g); return d ? 1300 + (d.depth) * DUEL_STEP + 1300 : 0; };
+  const DUEL_STEP = 520, DUEL_INTRO = 900;
+  const duelMs = (g) => { const d = duelInfo(g); return d ? DUEL_INTRO + d.depth * DUEL_STEP + 900 : 0; };
 
-  const api = { randInt, newDeck, sortFive, cmp, duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  const api = { DUEL_INTRO, runoutStep, randInt, newDeck, sortFive, cmp, duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);

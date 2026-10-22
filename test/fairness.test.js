@@ -116,7 +116,7 @@ test('pot distribution (side pots, refunds, splits, odd chips) matches the refer
     g.players.forEach((p, i) => (p.idx = i));
     const before = g.players.map((p) => p.chips + p.total);
     let guard = 0;
-    while (P.isLive(g)) { const p = g.players[g.toAct]; assert.ok(P.applyAction(g, p.id, randomAction(g, p.id)).ok); assert.ok(guard++ < 500, 'betting never ends'); }
+    while (P.isLive(g)) { if (g.runout) { P.runoutStep(g); continue; } const p = g.players[g.toAct]; assert.ok(P.applyAction(g, p.id, randomAction(g, p.id)).ok); assert.ok(guard++ < 500, 'betting never ends'); }
     const expect = refPayouts(g, before);
     assert.deepStrictEqual(g.players.map((p) => p.chips), expect, g.log.join(' | '));
     assert.strictEqual(g.players.reduce((a, p) => a + p.chips, 0), before.reduce((a, b) => a + b, 0), 'chips created or destroyed');
@@ -134,7 +134,7 @@ test('a refund is never reported as a win', () => {
   P.startHand(g);
   g.players[0].hole = ['Kh', 'Kd']; g.players[1].hole = ['Qh', 'Jd'];
   g.deck = g.deck.filter((c) => !['Kh', 'Kd', 'Qh', 'Jd', 'Kc', '7s', '7h', 'Qs', 'Jc'].includes(c)).concat(['Jc', 'Qs', '7h', '7s', 'Kc']);
-  while (P.isLive(g)) { const p = g.players[g.toAct]; P.applyAction(g, p.id, p.id === 'B' ? { type: 'allin' } : { type: 'call' }); }
+  while (P.isLive(g)) { if (g.runout) { P.runoutStep(g); continue; } const p = g.players[g.toAct]; P.applyAction(g, p.id, p.id === 'B' ? { type: 'allin' } : { type: 'call' }); }
   assert.deepStrictEqual(g.result.winners.map((w) => w.id), ['A']);
   assert.deepStrictEqual(g.result.refunds.map((r) => [r.id, r.amount]), [['B', 700]]);
 });
@@ -238,7 +238,12 @@ test('nobody sees hidden cards or the deck before showdown, and folded hands sta
       for (const viewer of g.players) {
         const v = P.viewFor(g, viewer.id);
         assert.strictEqual(v.deck, undefined);
-        for (const p of v.players) if (p.id !== viewer.id) assert.ok(p.hole.every((c) => c === '??'));
+        if (!g.runout) for (const p of v.players) if (p.id !== viewer.id) assert.ok(p.hole.every((c) => c === '??'));
+      }
+      if (g.runout) {
+        // during an all-in runout the live hands are tabled, but folded ones never are
+        for (const viewer of g.players) for (const p of P.viewFor(g, viewer.id).players) if (p.id !== viewer.id && p.folded) assert.ok(p.hole.every((c) => c === '??'));
+        P.runoutStep(g); continue;
       }
       const p = g.players[g.toAct]; P.applyAction(g, p.id, randomAction(g, p.id)); guard++;
     }
@@ -259,4 +264,16 @@ test('bots decide without ever reading hidden cards', () => {
     const d = P.botDecide(blind, actor.id); // would throw or misbehave if it touched hidden cards
     assert.ok(d && ['fold', 'check', 'call', 'raise', 'allin'].includes(d.type));
   }
+});
+
+test('an all-in runout deals one street at a time and nobody can act during it', () => {
+  const g = table(2, [300, 1000]);
+  act(g, { type: 'allin' }); act(g, { type: 'call' });
+  assert.strictEqual(g.runout, true);
+  assert.strictEqual(g.board.length, 2);
+  for (const p of g.players) assert.strictEqual(P.applyAction(g, p.id, { type: 'check' }).ok, false);
+  const seen = [g.board.length];
+  while (g.runout) { P.runoutStep(g); seen.push(g.board.length); }
+  assert.deepStrictEqual(seen, [2, 3, 4, 5, 5]);
+  assert.strictEqual(g.street, 'showdown');
 });

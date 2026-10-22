@@ -2,8 +2,9 @@
 // The host supplies persistence; clients are anything with send(data).
 const P = require('./public/poker.js');
 
-const NEXT_HAND_MS = 5000;
-const REVEAL_MS_PER_HAND = 1300; // matches the client's showdown tour
+const NEXT_HAND_MS = 2800;
+const RUNOUT_MS = 1300; // one street at a time when everyone is all-in
+const REVEAL_MS_PER_HAND = 850; // matches the client's showdown tour
 const BOT_MS = 900;
 const AWAY_TIMEOUT_MS = 30000; // auto check/fold only for disconnected players
 
@@ -44,6 +45,7 @@ function createHub(persist, initialRooms = {}) {
       }, g.street === 'waiting' ? 500 : NEXT_HAND_MS + revealTime(g));
       return;
     }
+    if (g.runout) { timers[room.id] = setTimeout(() => { P.runoutStep(g); broadcast(room); }, RUNOUT_MS); return; }
     const p = g.players[g.toAct];
     if (!p) return;
     if (p.bot) {

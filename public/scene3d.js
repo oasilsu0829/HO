@@ -35,7 +35,7 @@ const Scene3D = (() => {
   let lampDim = 1, lampSpike = 0, zapLevel = 0, zap = null, gunProto = null, eyesProto = null;
   const camCur = new THREE.Vector3(0, 1.5, 1.55), lookCur = new THREE.Vector3(0, 0.95, -0.55);
   let hands = null;
-  const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.22);
+  const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.36);
   const TUCK = new THREE.Vector3(), TUCK_OFF = new THREE.Vector3(0, -0.4, 0.3);
 
   // ---------- textures ----------
@@ -134,7 +134,7 @@ const Scene3D = (() => {
     }
     // a low rail the community cards lean on
     const rail = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.05), rimMat);
-    rail.position.set(0, TABLE_Y + 0.02, -0.42); rail.castShadow = true; tableGroup.add(rail);
+    rail.position.set(0, TABLE_Y + 0.02, -0.18); rail.castShadow = true; tableGroup.add(rail);
     // the deck
     const deck = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.05, 0.24), [0, 0, 0, 0, 0, 0].map((_, i) => new THREE.MeshLambertMaterial(i === 2 ? { map: cardTex('??') } : { color: 0x9b9274 })));
     deck.position.set(0.55, TABLE_Y + 0.025, -0.75); deck.rotation.y = 0.3; deck.castShadow = true; tableGroup.add(deck);
@@ -399,7 +399,7 @@ const Scene3D = (() => {
       const ex = Math.cos(a), ez = Math.sin(a);
       const fig = new THREE.Vector3(ex * 1.5, 0, ez * 1.3);
       const toward = (r) => new THREE.Vector3(ex * 1.5 * r, TABLE_Y, ez * 1.3 * r);
-      out[p.id] = { figure: fig, cards: toward(0.55), chips: toward(0.38), label: new THREE.Vector3(fig.x * 0.78, TABLE_Y + 0.02, fig.z * 0.78), yaw: Math.atan2(-fig.x, -fig.z) };
+      out[p.id] = { figure: fig, cards: toward(0.55), chips: toward(0.38), label: new THREE.Vector3(fig.x, 1.2, fig.z), yaw: Math.atan2(-fig.x, -fig.z) };
     });
     out[meId] = { cards: new THREE.Vector3(0.05, TABLE_Y + 0.24, 0.98), chips: new THREE.Vector3(0.38, TABLE_Y, 0.55), me: true };
     return out;
@@ -504,7 +504,7 @@ const Scene3D = (() => {
     g.board.forEach((c, i) => {
       const m = cardMesh(`b${g.handNo}-${i}`);
       // propped up on a rail so they read from your seat
-      setCard(m, c, new THREE.Vector3((i - 2) * 0.21, TABLE_Y + 0.1, -0.32), -0.75, 0, 0, i < 3 ? i * 0.15 : 0);
+      setCard(m, c, new THREE.Vector3((i - 2) * 0.21, TABLE_Y + 0.1, -0.08), -0.75, 0, 0, i < 3 ? i * 0.15 : 0);
       m.scale.setScalar(1.2);
       m.userData.board = true;
       m.userData.glow = reveal.has(c);
@@ -513,7 +513,7 @@ const Scene3D = (() => {
     // chips
     for (const p of g.players) if (p.bet > 0) stack(`bet-${p.id}`, seatPos[p.id].chips, p.bet, g.bb);
     const pot = g.pot;
-    if (pot > 0) stack('pot', new THREE.Vector3(-0.05, TABLE_Y, 0.22), pot, g.bb);
+    if (pot > 0) stack('pot', POT_POS.clone(), pot, g.bb);
     // winner gets the pot slid to them
     if (g.street === 'showdown' && g.result) {
       for (const w of g.result.winners) {
@@ -566,7 +566,8 @@ const Scene3D = (() => {
       if (dead === 'gone') { f.visible = false; continue; }
       f.visible = true;
       f.position.lerp(u.target, 0.1);
-      f.rotation.x += ((dead === 'slump' ? 0.6 : dead === 'limp' ? -0.25 : 0) - f.rotation.x) * 0.1;
+      f.rotation.x += ((dead === 'slump' ? -0.32 : dead === 'limp' ? -0.25 : 0) - f.rotation.x) * 0.1;
+      f.rotation.z += ((dead === 'slump' ? 0.38 * (u.bob > 3 ? 1 : -1) : 0) - f.rotation.z) * 0.1;
       u.head.visible = !headless[u.pid];
       if (dead) { u.head.rotation.x = dead === 'limp' ? 0.6 : 0.2; u.eyeMat.opacity = 0; continue; }
       u.head.position.y = 1.58 + Math.sin(t / 900 + u.bob) * 0.008 - (u.out ? 0.08 : 0);
@@ -636,7 +637,7 @@ const Scene3D = (() => {
       const v = l.pos.clone().project(camera);
       const half = els[i].offsetWidth / 2 + 4; // keep labels on screen
       const sx = Math.max(half, Math.min(window.innerWidth - half, (v.x * 0.5 + 0.5) * window.innerWidth));
-      els[i].style.transform = `translate(${sx}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
+      els[i].style.transform = `translate(${sx}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -50%)`;
       els[i].style.display = v.z > 1 ? 'none' : '';
     }
   }
@@ -841,7 +842,7 @@ const Scene3D = (() => {
       if (k > 1.8) {
         const a = Math.min(1, (k - 1.8) / 0.5);
         u.head.rotation.z = -0.6 * Math.exp(-(k - 1.8) * 6);
-        f.rotation.x = 0.6 * a;
+        f.rotation.x = -0.32 * a; f.rotation.z = 0.38 * a * (u.bob > 3 ? 1 : -1);
         u.head.rotation.x = 0.2 * a;
         if (k > 2.4) deadPose[e.id] = 'slump';
       }
