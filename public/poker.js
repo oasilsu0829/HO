@@ -52,6 +52,16 @@
   }
 
   function bestHand(cards) {
+    if (cards.length < 5) {
+      // too few cards for straights/flushes: only pairs and sets count
+      const vals = cards.map(rv).sort((x, y) => y - x);
+      const cnt = {}; for (const v of vals) cnt[v] = (cnt[v] || 0) + 1;
+      const groups = Object.entries(cnt).map(([v, k]) => [k, +v]).sort((x, y) => y[0] - x[0] || y[1] - x[1]);
+      const by = groups.map((x) => x[1]);
+      const cat = groups[0][0] === 4 ? 7 : groups[0][0] === 3 ? 3 : groups[0][0] === 2 ? (groups[1] && groups[1][0] === 2 ? 2 : 1) : 0;
+      const score = [cat, ...by];
+      return { score, cards: cards.slice(), name: handName(score) };
+    }
     let best = null;
     const n = cards.length;
     for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) for (let c = b + 1; c < n; c++)
@@ -140,7 +150,8 @@
     return (g.stats[id] = g.stats[id] || { hands: 0, vpip: 0, agg: 0, pas: 0, faced: 0, foldBet: 0, bluffs: 0 });
   }
 
-  const isLive = (g) => ['preflop', 'flop', 'turn', 'river'].includes(g.street);
+  // House rule: a 2-card flop, then one card per street (0 → 2 → 3 → 4 → 5), so there's an extra betting round.
+  const isLive = (g) => ['preflop', 'flop', 'turn', 'fourth', 'river'].includes(g.street);
 
   function log(g, msg) {
     g.log.push(msg);
@@ -302,9 +313,10 @@
       g.minRaise = g.bb;
       g.aggressor = null;
       if (g.street === 'river') return showdown(g);
-      if (g.street === 'preflop') { g.board.push(g.deck.pop(), g.deck.pop(), g.deck.pop()); g.street = 'flop'; }
+      if (g.street === 'preflop') { g.board.push(g.deck.pop(), g.deck.pop()); g.street = 'flop'; }
       else if (g.street === 'flop') { g.board.push(g.deck.pop()); g.street = 'turn'; }
-      else if (g.street === 'turn') { g.board.push(g.deck.pop()); g.street = 'river'; }
+      else if (g.street === 'turn') { g.board.push(g.deck.pop()); g.street = 'fourth'; }
+      else if (g.street === 'fourth') { g.board.push(g.deck.pop()); g.street = 'river'; }
       for (const p of g.players) if (canAct(p) && p.lastAction !== '올인') p.lastAction = '';
       if (g.players.filter(canAct).length >= 2) {
         g.toAct = nextIdx(g, g.dealer, canAct);
@@ -483,7 +495,7 @@
       if (effEq > fair + 0.12 - P.aggr * 0.08) d = { type: 'allin', say: talk('allin', 0.7), think: tank() + 800 };
       else d = L.canCheck ? { type: 'check', think: quick() } : effEq >= need ? { type: 'call', think: tank() } : { type: 'fold', say: talk('fold', 0.3), think: tank() };
     } else if (L.canCheck) {
-      const postflop = g.street === 'flop' || g.street === 'turn';
+      const postflop = g.street === 'flop' || g.street === 'turn' || g.street === 'fourth';
       if (strength > 0.75 && postflop && r < (1 - P.aggr) * 0.45) {
         d = { type: 'check', say: talk('trap', 0.3), think: quick() + 400 }; // slow-play the monster
       } else if (strength > 0.4 - P.aggr * 0.15) {

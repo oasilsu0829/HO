@@ -298,7 +298,7 @@ const Scene3D = (() => {
         const d = pi * 0.06 + i * 0.25;
         if (s.me) {
           // face down on the felt in front of me; the faces are shown once, in the HUD
-          const pos = new THREE.Vector3((i - 0.5) * 0.19 + 0.02, TABLE_Y + 0.003 + i * 0.002, 0.52);
+          const pos = new THREE.Vector3(0.62 + i * 0.12, TABLE_Y + 0.003 + i * 0.002, 0.42);
           if (p.folded) pos.lerp(new THREE.Vector3(0, TABLE_Y + 0.002, -0.45), 0.6);
           setCard(m, '??', pos, -Math.PI / 2, 0, (0.5 - i) * 0.1, d);
         } else {

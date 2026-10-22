@@ -221,7 +221,7 @@ function cardHTML(c, size = '', extra = '') {
   const r = c[0] === 'T' ? '10' : c[0];
   return `<div class="card suit-${c[1]} ${size} ${extra}"><span class="r">${r}</span><span class="s1">${SUIT_CH[c[1]]}</span><span class="pip">${SUIT_CH[c[1]]}</span></div>`;
 }
-const STREET_KO = { waiting: '대기 중', preflop: '프리플랍', flop: '플랍', turn: '턴', river: '리버', showdown: '쇼다운' };
+const STREET_KO = { waiting: '대기 중', preflop: '프리플랍', flop: '플랍 (2장)', turn: '턴 (3장)', fourth: '포스 (4장)', river: '리버 (5장)', showdown: '쇼다운' };
 const fmt = (n) => n.toLocaleString('en-US');
 
 const REVEAL_PER = 1.3; // seconds the camera spends on each revealed hand
@@ -368,7 +368,7 @@ function renderActions(ctx) {
   const g = ctx.game, L = ctx.legal, box = $('#actions');
   const me = g.players.find((p) => p.id === ctx.me);
   let mine = '';
-  if (me && me.hole.length && me.hole[0] !== '??' && g.board.length >= 3 && !me.folded) mine = `내 패: <b>${Poker.bestHand(me.hole.concat(g.board)).name}</b>`;
+  if (me && me.hole.length && me.hole[0] !== '??' && g.board.length >= 2 && !me.folded) mine = `내 패: <b>${Poker.bestHand(me.hole.concat(g.board)).name}</b>`;
   if (!L) {
     raiseDraft = null;
     let msg = '';
