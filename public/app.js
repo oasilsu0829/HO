@@ -99,19 +99,19 @@ const FX = {
     if (kind === 'check') { this.tone(180, 0.08, 0.4, 'square'); setTimeout(() => this.tone(160, 0.08, 0.3, 'square'), 110); } // two knocks on wood
     if (kind === 'fold') { this.noise(0.35, 900, 0.5); this.tone(220, 0.4, 0.15, 'sawtooth', 60); }
     if (kind === 'raise') { this.tone(90, 0.25, 0.8, 'sine', 40); this.noise(0.12, 1500, 0.6); }
-    if (kind === 'allin') { // pump + blast
-      this.noise(0.08, 2500, 0.6, 'bandpass'); setTimeout(() => this.noise(0.08, 1800, 0.6, 'bandpass'), 140);
-      setTimeout(() => { this.noise(0.9, 700, 1.4); this.tone(60, 0.8, 1, 'sine', 25); }, 420);
+    if (kind === 'rack') { // shell goes in, slide racks: nothing fired yet
+      this.noise(0.06, 2500, 0.6, 'bandpass'); setTimeout(() => this.noise(0.09, 1600, 0.7, 'bandpass'), 180);
+      setTimeout(() => this.tone(70, 0.2, 0.6, 'sine', 45), 190);
     }
+    if (kind === 'blast') { this.noise(1.1, 650, 1.6); this.tone(55, 0.9, 1, 'sine', 22); }
+    if (kind === 'click') { this.noise(0.03, 5000, 0.7, 'highpass'); } // empty chamber
     if (kind === 'heart') { this.tone(55, 0.12, 0.9, 'sine', 40); setTimeout(() => this.tone(50, 0.14, 0.7, 'sine', 35), 180); }
     if (kind === 'win') [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, 0.35, 0.2, 'triangle'), i * 90));
     if (kind === 'lose') { this.tone(110, 1.2, 0.4, 'sawtooth', 40); }
     if (kind === 'deal') this.noise(0.06, 3000, 0.25, 'bandpass');
   },
   shake(big) {
-    const el = $('#table');
-    el.classList.remove('shake', 'shake-big'); void el.offsetWidth;
-    el.classList.add(big ? 'shake-big' : 'shake');
+    if (typeof Scene3D !== 'undefined') Scene3D.shake(big);
     if (navigator.vibrate) try { navigator.vibrate(big ? [80, 40, 160] : 40); } catch {}
   },
   flash(color) {
@@ -136,18 +136,31 @@ const FX = {
     if (this.lastHand !== null && g.handNo !== this.lastHand) this.sfx('deal');
     this.lastSeq = seq; this.lastHand = g.handNo;
     for (const line of fresh) {
-      if (/올인/.test(line)) { this.sfx('allin'); setTimeout(() => { this.shake(true); this.flash('rgba(210,48,31,.7)'); this.stamp('ALL IN'); }, 420); }
+      if (/올인/.test(line)) { this.sfx('rack'); setTimeout(() => { this.shake(false); this.stamp('ALL IN', 'var(--bone)'); }, 200); }
       else if (/레이즈|벳/.test(line)) { this.sfx('raise'); this.shake(false); }
       else if (/ 콜 /.test(line)) this.sfx('chip');
       else if (/체크/.test(line)) this.sfx('check');
       else if (/다이/.test(line)) { this.sfx('fold'); if (line.startsWith(me.name + ' ')) this.flash('rgba(0,0,0,.9)'); }
       else if (/승리/.test(line)) {
-        const iWon = (g.result?.winners || []).some((w) => w.id === me.id);
-        const big = (g.result?.winners || []).reduce((s, w) => s + w.amount, 0) >= g.bb * 20;
+        const winners = g.result?.winners || [];
+        const iWon = winners.some((w) => w.id === me.id);
+        const big = winners.reduce((s, w) => s + w.amount, 0) >= g.bb * 20;
+        const iWasIn = me.inHand && !me.folded;
+        // someone who shoved and lost takes the shot
+        const shotLoser = g.players.some((p) => p.allIn && p.inHand && !p.folded && !winners.some((w) => w.id === p.id));
+        const delay = g.result?.uncontested ? 0 : 900;
         setTimeout(() => {
-          if (iWon) { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); if (big) this.stamp('JACKPOT', 'var(--amber)'); }
-          else if (me.inHand && !me.folded) { this.sfx('lose'); this.flash('rgba(143,29,20,.6)'); }
-        }, g.result?.uncontested ? 0 : 600);
+          if (iWasIn && !iWon && me.allIn) {
+            this.sfx('blast'); this.shake(true); this.flash('rgba(210,48,31,.85)'); this.stamp('탕!');
+          } else if (iWon) {
+            if (me.allIn) this.sfx('click');
+            setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); if (big) this.stamp('JACKPOT', 'var(--amber)'); }, me.allIn ? 450 : 0);
+            if (shotLoser) setTimeout(() => { this.sfx('blast'); this.shake(false); }, me.allIn ? 0 : 200);
+          } else {
+            if (shotLoser) { this.sfx('blast'); this.shake(true); }
+            if (iWasIn) { this.sfx('lose'); this.flash('rgba(143,29,20,.5)'); }
+          }
+        }, delay);
         break;
       }
     }
@@ -178,51 +191,36 @@ let raiseDraft = null; // keep slider value across re-renders of the same decisi
  * Draws the whole table.
  * ctx = { game, me, legal, onAction, hostTools, isHost, onKick }
  */
+const isDealer = (g, id) => g.street !== 'waiting' && g.players[g.dealer]?.id === id;
 function renderTable(ctx) {
   const g = ctx.game;
-  const n = g.players.length;
-  const meIdx = Math.max(0, g.players.findIndex((p) => p.id === ctx.me));
   const winIds = new Set((g.result?.winners || []).map((w) => w.id));
   const shown = g.result?.hands || {};
-  const highlight = new Set();
-  if (g.street === 'showdown') for (const w of g.result?.winners || []) for (const c of shown[w.id]?.cards || []) highlight.add(c);
 
-  // seats around an ellipse, me at the bottom
-  let seatsHTML = '';
-  g.players.forEach((p, i) => {
-    const k = (i - meIdx + n) % n;
-    const a = Math.PI / 2 + (k * 2 * Math.PI) / n;
-    const x = 50 + 50 * Math.cos(a), y = 50 + 52 * Math.sin(a);
-    const bx = 50 + 30 * Math.cos(a), by = 50 + 30 * Math.sin(a);
-    const cls = ['seat'];
-    if (i === g.toAct) cls.push('turn');
-    if (p.folded && g.street !== 'waiting') cls.push('folded');
-    if (p.online === false) cls.push('offline');
-    if (winIds.has(p.id) && g.street === 'showdown') cls.push('win');
-    if (p.id === ctx.me) cls.push('me', 'mine');
-    const badgeCls = p.lastAction === '다이' ? 'fold' : p.lastAction === '올인' ? 'allin' : /레이즈|벳/.test(p.lastAction) ? 'raise' : '';
-    const size = p.id === ctx.me ? '' : 'sm';
-    const cards = p.hole.length ? p.hole.map((c) => cardHTML(c, size, highlight.has(c) ? 'hl' : '')).join('') : '';
-    const hn = shown[p.id] ? `<div class="handname">${shown[p.id].name}</div>` : '';
-    const status = p.chips === 0 && !p.inHand ? '<div class="handname">파산</div>' : '';
-    seatsHTML += `<div class="${cls.join(' ')}" style="left:${x}%;top:${y}%">
-      <div class="cards">${cards}</div>${hn}
-      <div class="plate">
+  if (!renderTable.inited) { Scene3D.init($('#stage')); renderTable.inited = true; }
+  Scene3D.update(g, {
+    me: ctx.me,
+    onKick: ctx.onKick,
+    labelHTML: (p) => {
+      const i = g.players.indexOf(p);
+      const cls = ['plate'];
+      if (i === g.toAct) cls.push('turn');
+      if (p.folded && g.street !== 'waiting') cls.push('folded');
+      if (p.online === false) cls.push('offline');
+      if (winIds.has(p.id) && g.street === 'showdown') cls.push('win');
+      const badgeCls = p.lastAction === '다이' ? 'fold' : p.lastAction === '올인' ? 'allin' : /레이즈|벳/.test(p.lastAction) ? 'raise' : '';
+      return `<div class="${cls.join(' ')}">
         ${i === g.dealer && g.street !== 'waiting' ? '<div class="dealer">D</div>' : ''}
         ${p.lastAction ? `<div class="badge ${badgeCls}">${p.lastAction}</div>` : ''}
-        <div class="name">${p.bot ? '🤖 ' : ''}${esc(p.name)}</div>
-        <div class="chips">$${fmt(p.chips)}</div>
-        ${ctx.isHost && p.id !== ctx.me ? `<button class="btn tiny red kick" data-kick="${p.id}">✕</button>` : ''}
-      </div>${status}
-    </div>`;
-    if (p.bet > 0) seatsHTML += `<div class="bet" style="left:${bx}%;top:${by}%"><span class="chip"></span>${fmt(p.bet)}</div>`;
+        <div class="name">${esc(p.name)}</div>
+        <div class="chips">$${fmt(p.chips)}${p.bet ? ` <span class="betamt">▸${fmt(p.bet)}</span>` : ''}</div>
+        ${shown[p.id] ? `<div class="handname">${shown[p.id].name}</div>` : ''}
+        ${p.chips === 0 && !p.inHand ? '<div class="handname">파산</div>' : ''}
+        ${ctx.isHost ? `<button class="btn tiny red kick" data-kick="${p.id}">✕</button>` : ''}
+      </div>`;
+    },
   });
-  $('#seats').innerHTML = seatsHTML;
-  $('#seats').querySelectorAll('[data-kick]').forEach((b) => (b.onclick = () => ctx.onKick(b.dataset.kick)));
 
-  const board = [];
-  for (let i = 0; i < 5; i++) board.push(cardHTML(g.board[i], 'lg', g.board[i] && highlight.size && !highlight.has(g.board[i]) ? 'dim' : highlight.has(g.board[i]) ? 'hl' : ''));
-  $('#board').innerHTML = board.join('');
   const livePot = g.pot + g.players.reduce((s, p) => s + p.bet, 0);
   $('#pot').textContent = `POT $${fmt(livePot)}`;
   $('#pot').hidden = livePot === 0 && g.street !== 'showdown';
@@ -236,6 +234,8 @@ function renderTable(ctx) {
     banner.innerHTML = g.result.winners.map((w) => `${esc(w.name)} +$${fmt(w.amount)}${w.hand ? ` <small>(${w.hand})</small>` : ''}`).join('<br>');
   } else banner.hidden = true;
 
+  const myP = g.players.find((p) => p.id === ctx.me);
+  ctx.myLine = myP ? `<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
   $('#log').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
   $('#log').scrollTop = 1e6;
 
@@ -260,7 +260,7 @@ function renderActions(ctx) {
     else if (me?.folded) msg = '다이했습니다';
     else if (me?.allIn) msg = '올인!';
     else msg = `${esc(g.players[g.toAct]?.name || '')}의 차례…`;
-    box.innerHTML = `<div class="info">${mine ? mine + '<br>' : ''}${msg}</div>`;
+    box.innerHTML = `<div class="info">${ctx.myLine || ''}<br>${mine ? mine + '<br>' : ''}${msg}</div>`;
     if (ctx.extraButtons) box.append(...ctx.extraButtons());
     return;
   }
@@ -268,7 +268,7 @@ function renderActions(ctx) {
   if (!raiseDraft || raiseDraft.key !== key) raiseDraft = { key, val: L.minTo };
   const betWord = g.currentBet === 0 ? '벳' : '레이즈';
   box.innerHTML = `
-    ${mine ? `<div class="info">${mine}</div>` : ''}
+    <div class="info">${ctx.myLine || ''}${mine ? '<br>' + mine : ''}</div>
     <button class="btn red" data-a="fold">다이</button>
     ${L.canCheck ? '<button class="btn blue" data-a="check">체크</button>' : `<button class="btn blue" data-a="call">${L.callAmt < L.toCall ? '올인' : '콜'} $${fmt(L.callAmt)}</button>`}
     ${L.canRaise ? `<div class="raisebox">

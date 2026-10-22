@@ -310,3 +310,35 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
   .seat .cards { min-height: 40px; }
   #dealerMask { transform: translateX(-50%) scale(.7); top: -78px; }
 }
+
+/* ---------- first-person 3D table ---------- */
+#stage { position: fixed; inset: 0; z-index: 0; background: #030403; }
+#canvas3d { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; image-rendering: crisp-edges; }
+#labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.lbl { position: absolute; left: 0; top: 0; will-change: transform; opacity: .92; }
+.lbl .plate {
+  pointer-events: auto; position: relative; min-width: 84px; text-align: center; padding: 3px 8px;
+  background: rgba(0,0,0,.72); border: 1px solid var(--line); font-size: 12px;
+}
+.lbl .plate.turn { border-color: var(--sick); box-shadow: 0 0 14px rgba(143,174,90,.4); }
+.lbl .plate.turn .name::before { content: '▶ '; color: var(--sick); animation: blink 1s steps(2) infinite; }
+.lbl .plate.folded { opacity: .35; }
+.lbl .plate.win { border-color: var(--amber); box-shadow: 0 0 24px 4px rgba(216,160,58,.45); }
+.lbl .plate.offline .name::after { content: ' ⚡'; color: var(--amber); }
+.lbl .chips { color: var(--amber); font-variant-numeric: tabular-nums; }
+.lbl .betamt { color: var(--bone); }
+#table > #topbar, #table > #actions, #table > #center, #table > #log { position: relative; z-index: 2; }
+#table #center {
+  position: fixed; inset: auto; top: max(56px, calc(env(safe-area-inset-top, 0px) + 48px)); left: 50%; transform: translateX(-50%);
+  flex-direction: row; gap: 14px; pointer-events: none; z-index: 2;
+}
+#banner { position: fixed; top: 24%; left: 50%; transform: translateX(-50%); }
+@keyframes reveal { 0%, 45% { opacity: 0; transform: translateX(-50%) scale(.9); } 60% { opacity: 1; transform: translateX(-50%) scale(1.06); } 100% { opacity: 1; transform: translateX(-50%); } }
+#table { justify-content: space-between; }
+#table #actions {
+  position: fixed; left: 0; right: 0; bottom: 0; max-width: none; margin: 0 auto;
+  padding: 24px max(16px, env(safe-area-inset-left, 0px)) calc(10px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(0,0,0,.92), rgba(0,0,0,.6) 70%, transparent);
+}
+.mystack { color: var(--amber); letter-spacing: 1px; }
+#table #log { bottom: 110px; position: fixed; }

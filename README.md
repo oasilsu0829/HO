@@ -36,7 +36,8 @@ node server.js          # Node 18+ 필요, npm install 필요 없음 (의존성 
 | 파일 | 내용 |
 |---|---|
 | `public/poker.js` | 게임 엔진 (족보 판정, 베팅, 사이드팟, 봇 AI) — 브라우저/서버 공용 |
-| `public/app.js` | 화면, 연습 모드, 온라인 클라이언트 |
+| `public/scene3d.js` | 1인칭 3D 테이블 (Three.js, `public/vendor/`) |
+| `public/app.js` | 화면, 효과음/연출, 연습 모드, 온라인 클라이언트 |
 | `server.js` | 정적 파일 + JSON API + SSE 실시간 전송, 방 저장 |
 
 ## 아이패드 / 폰
