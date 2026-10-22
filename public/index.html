@@ -7,24 +7,26 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="홀덤">
-<title>PIXEL HOLD'EM</title>
+<title>Dead Man's Hold'em</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@2.40.3/dist/galmuri.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <div id="bg"></div>
 <div id="crt"></div>
+<div id="flash"></div>
+<div id="stamp"></div>
 
 <!-- MENU -->
 <section id="menu" class="screen">
-  <h1 class="logo"><span class="s">♠</span> PIXEL<br>HOLD'EM <span class="h">♥</span></h1>
+  <h1 class="logo"><span class="s">♠</span> DEAD MAN'S<br>HOLD'EM <span class="h">♥</span></h1>
   <div class="panel menu-panel">
     <button class="btn blue big" id="btnContinue" hidden>이어하기</button>
     <button class="btn orange big" data-go="practiceSetup">연습 모드</button>
     <button class="btn red big" data-go="lobby">온라인 모드</button>
     <button class="btn gray" data-go="rules">족보 보기</button>
   </div>
-  <p class="foot">텍사스 홀덤 · 노리밋</p>
+  <p class="foot">살아서 나가려면 이겨라</p>
 </section>
 
 <!-- PRACTICE SETUP -->
@@ -82,8 +84,10 @@
     <button class="btn tiny gray" id="btnExit">나가기</button>
     <span id="roomInfo"></span>
     <span id="hostCtl"></span>
+    <button class="btn tiny gray" id="btnSound">소리 ON</button>
   </div>
   <div id="felt">
+    <div id="dealerMask"><i></i><b></b><i></i></div>
     <div id="center">
       <div id="street"></div>
       <div id="board"></div>

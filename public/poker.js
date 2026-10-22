@@ -124,6 +124,7 @@
 
   function log(g, msg) {
     g.log.push(msg);
+    g.logSeq = (g.logSeq || 0) + 1;
     if (g.log.length > 40) g.log.shift();
   }
 
@@ -218,8 +219,8 @@
     if (type === 'allin') { type = L.canRaise ? 'raise' : 'call'; action = { type, amount: L.maxTo }; }
 
     if (type === 'fold') {
-      p.folded = true; p.lastAction = '폴드';
-      log(g, `${p.name} 폴드`);
+      p.folded = true; p.lastAction = '다이';
+      log(g, `${p.name} 다이`);
     } else if (type === 'check') {
       p.lastAction = '체크';
       log(g, `${p.name} 체크`);
