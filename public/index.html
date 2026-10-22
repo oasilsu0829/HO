@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>PIXEL HOLD'EM</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/galmuri@2.40.3/dist/galmuri.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="bg"></div>
+<div id="crt"></div>
+
+<!-- MENU -->
+<section id="menu" class="screen">
+  <h1 class="logo"><span class="s">♠</span> PIXEL<br>HOLD'EM <span class="h">♥</span></h1>
+  <div class="panel menu-panel">
+    <button class="btn blue big" id="btnContinue" hidden>이어하기</button>
+    <button class="btn orange big" data-go="practiceSetup">연습 모드</button>
+    <button class="btn red big" data-go="lobby">온라인 모드</button>
+    <button class="btn gray" data-go="rules">족보 보기</button>
+  </div>
+  <p class="foot">텍사스 홀덤 · 노리밋</p>
+</section>
+
+<!-- PRACTICE SETUP -->
+<section id="practiceSetup" class="screen" hidden>
+  <div class="panel form">
+    <h2>연습 모드</h2>
+    <label>닉네임 <input id="pName" maxlength="12"></label>
+    <label>봇 수 <select id="pBots"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></label>
+    <label>시작 칩 <input id="pChips" type="number" value="1000" step="100"></label>
+    <label>빅 블라인드 <input id="pBB" type="number" value="20" step="2"></label>
+    <div class="row">
+      <button class="btn gray" data-go="menu">뒤로</button>
+      <button class="btn orange" id="btnPracticeStart">시작!</button>
+    </div>
+  </div>
+</section>
+
+<!-- LOBBY -->
+<section id="lobby" class="screen" hidden>
+  <div class="panel form wide">
+    <h2>온라인 로비</h2>
+    <label>닉네임 <input id="oName" maxlength="12"></label>
+    <div class="cols">
+      <div>
+        <h3>방 만들기</h3>
+        <label>방 이름 <input id="oRoomName" maxlength="20" placeholder="(선택)"></label>
+        <label>시작 칩 <input id="oChips" type="number" value="1000" step="100"></label>
+        <label>빅 블라인드 <input id="oBB" type="number" value="20" step="2"></label>
+        <button class="btn orange" id="btnCreate">방 만들기</button>
+      </div>
+      <div>
+        <h3>방 참가</h3>
+        <label>방 코드 <input id="oCode" maxlength="4" placeholder="ABCD" style="text-transform:uppercase"></label>
+        <button class="btn blue" id="btnJoin">코드로 참가</button>
+        <h3>열린 방 <button class="btn tiny gray" id="btnRefresh">↻</button></h3>
+        <ul id="roomList"></ul>
+      </div>
+    </div>
+    <div class="row"><button class="btn gray" data-go="menu">뒤로</button></div>
+  </div>
+</section>
+
+<!-- RULES -->
+<section id="rules" class="screen" hidden>
+  <div class="panel form wide">
+    <h2>족보 (높은 순)</h2>
+    <ol id="rankList"></ol>
+    <div class="row"><button class="btn gray" data-go="menu">뒤로</button></div>
+  </div>
+</section>
+
+<!-- TABLE -->
+<section id="table" class="screen" hidden>
+  <div id="topbar">
+    <button class="btn tiny gray" id="btnExit">나가기</button>
+    <span id="roomInfo"></span>
+    <span id="hostCtl"></span>
+  </div>
+  <div id="felt">
+    <div id="center">
+      <div id="street"></div>
+      <div id="board"></div>
+      <div id="pot"></div>
+      <div id="banner" hidden></div>
+    </div>
+    <div id="seats"></div>
+  </div>
+  <div id="log"></div>
+  <div id="actions"></div>
+</section>
+
+<div id="toast" hidden></div>
+<div id="modal" hidden><div class="panel" id="modalBody"></div></div>
+
+<script src="poker.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

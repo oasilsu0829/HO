@@ -1,0 +1,8 @@
+{
+  "name": "pixel-holdem",
+  "version": "1.0.0",
+  "private": true,
+  "description": "친구끼리 하는 도트 스타일 텍사스 홀덤",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
