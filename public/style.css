@@ -462,7 +462,7 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 #celeb .ccards { position: relative; display: flex; gap: 10px; }
 #celeb .cc { display: inline-block; animation: dealHop .5s cubic-bezier(.25,1.8,.5,1) both; animation-delay: calc(var(--i) * 80ms); transform-origin: 50% 100%; }
 #celeb .cc .card { animation: none; }
-#celeb .cc.kick .card { filter: brightness(.45); }
+#celeb .cc.kicker .card { filter: brightness(.45); }
 #celeb .csub { position: relative; font-size: 16px; color: var(--bone); text-shadow: 2px 2px 0 var(--ink); animation: hop .4s cubic-bezier(.3,1.9,.5,1) .5s both; }
 @keyframes hop { 0% { transform: translateY(30px) scale(.4, 1.6); opacity: 0; } 55% { transform: translateY(-10px) scale(1.2, .8); opacity: 1; } 75% { transform: translateY(3px) scale(.92, 1.08); } 100% { transform: none; opacity: 1; } }
 @keyframes dealHop { 0% { transform: translateY(-120px) rotate(-20deg) scale(.6); opacity: 0; } 60% { transform: translateY(8px) scale(1.15, .85); opacity: 1; } 80% { transform: translateY(-6px) scale(.95, 1.05); } 100% { transform: none; opacity: 1; } }
@@ -510,7 +510,7 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 #celeb.t6 .cc { animation: dealHop .5s cubic-bezier(.25,1.8,.5,1) calc(var(--i) * 80ms) both, boing .55s ease-in-out calc(1s + var(--i) * 70ms) 3; }
 /* 7: quads — the four slam one by one, red */
 #celeb.t7 .cbg { background: radial-gradient(ellipse at 50% 50%, rgba(143,29,20,.55), rgba(0,0,0,.92)); animation: wash var(--dur) ease-out; }
-#celeb.t7 .cc.kick { animation: dealHop .5s cubic-bezier(.25,1.8,.5,1) .3s both; }
+#celeb.t7 .cc.kicker { animation: dealHop .5s cubic-bezier(.25,1.8,.5,1) .3s both; }
 #celeb.t7 .cc.core { animation: slam .4s cubic-bezier(.3,1.6,.5,1) both; animation-delay: calc(.7s + var(--i) * 330ms); }
 #celeb.t7 .ctitle { animation: slam .5s cubic-bezier(.3,1.6,.5,1) 2.05s both; }
 #celeb.t7 .ctitle .big { font-size: 64px; color: var(--rust-hi); animation: glitch .25s steps(2) 2.1s 6; }

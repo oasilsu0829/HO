@@ -347,7 +347,7 @@ const Celebrate = {
       : `<span class="big">${NAMES[tier].split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('')}</span><span class="ko">${ko}</span>`;
     el.querySelector('.ctitle').innerHTML = tier === 0 ? `<span class="ko">${ko}</span>` : title;
     el.querySelector('.csub').innerHTML = `${who} · +$${fmt(best.w.amount)}`;
-    el.querySelector('.ccards').innerHTML = tier === 0 ? '' : order.map((c, i) => `<span class="cc ${core.has(c) ? 'core' : 'kick'}" style="--i:${i}">${cardHTML(c, 'lg')}</span>`).join('');
+    el.querySelector('.ccards').innerHTML = tier === 0 ? '' : order.map((c, i) => `<span class="cc ${core.has(c) ? 'core' : 'kicker'}" style="--i:${i}">${cardHTML(c, 'lg')}</span>`).join('');
     // restart CSS animations
     el.querySelectorAll('*').forEach((n) => { n.style.animation = 'none'; void n.offsetWidth; n.style.animation = ''; });
 
