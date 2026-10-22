@@ -151,7 +151,7 @@ const FX = {
         const iWon = winners.some((w) => w.id === me.id);
         const big = winners.reduce((s, w) => s + w.amount, 0) >= g.bb * 20;
         const iWasIn = me.inHand && !me.folded;
-        const delay = g.result?.uncontested ? 0 : 900;
+        const delay = g.result?.uncontested ? 0 : Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 300;
         setTimeout(() => {
           if (iWasIn && !iWon && me.allIn) {
             // the only time the gun goes off: you shoved and lost
@@ -191,6 +191,71 @@ function cardHTML(c, size = '', extra = '') {
 }
 const STREET_KO = { waiting: '대기 중', preflop: '프리플랍', flop: '플랍', turn: '턴', river: '리버', showdown: '쇼다운' };
 const fmt = (n) => n.toLocaleString('en-US');
+
+const REVEAL_PER = 1.3; // seconds the camera spends on each revealed hand
+const RANK_KO = { 14: 'A', 13: 'K', 12: 'Q', 11: 'J', 10: '10' };
+const rankName = (v) => RANK_KO[v] || String(v);
+
+// Which cards in a best-five actually make the hand (the rest are kickers).
+function coreCards(cards, score) {
+  const cat = score[0];
+  if (cat === 4 || cat === 5 || cat === 8) return new Set(cards);
+  const val = (c) => '23456789TJQKA'.indexOf(c[0]) + 2;
+  if (cat === 0) return new Set([cards.slice().sort((a, b) => val(b) - val(a))[0]]);
+  const cnt = {};
+  for (const c of cards) cnt[val(c)] = (cnt[val(c)] || 0) + 1;
+  return new Set(cards.filter((c) => cnt[val(c)] >= 2));
+}
+
+// Plain-language reason the winner beat the best losing hand.
+function explain(g) {
+  const r = g.result, hands = r.hands;
+  const winIds = new Set(r.winners.map((w) => w.id));
+  const nameOf = (id) => esc(g.players.find((p) => p.id === id)?.name || '');
+  const ws = r.winners.filter((w) => hands[w.id]);
+  if (!ws.length) return '';
+  const losers = Object.keys(hands).filter((id) => !winIds.has(id))
+    .sort((a, b) => cmpScore(hands[b].score, hands[a].score));
+  if (!losers.length) return `${ws.map((w) => nameOf(w.id)).join(', ')} — 같은 패라서 팟을 나눕니다`;
+  const w = hands[ws[0].id].score, l = hands[losers[0]].score;
+  const who = `<b>${nameOf(ws[0].id)}</b>${ws.length > 1 ? ' 외' : ''}`;
+  if (w[0] !== l[0]) return `${who}의 <b>${hands[ws[0].id].name}</b>가 ${nameOf(losers[0])}의 ${hands[losers[0]].name}보다 높은 족보`;
+  let i = 1; while (i < w.length && w[i] === l[i]) i++;
+  const cat = w[0];
+  const label = ({
+    0: i === 1 ? '가장 높은 카드' : '키커', 5: i === 1 ? '가장 높은 카드' : '키커',
+    1: i === 1 ? '페어 숫자' : '키커', 2: i === 1 ? '높은 페어' : i === 2 ? '낮은 페어' : '키커',
+    3: i === 1 ? '트리플 숫자' : '키커', 4: '스트레이트 꼭대기', 8: '스트레이트 꼭대기',
+    6: i === 1 ? '트리플 숫자' : '페어 숫자', 7: i === 1 ? '포카드 숫자' : '키커',
+  })[cat];
+  return `둘 다 <b>${hands[ws[0].id].name}</b> → ${label} 비교: ${who} <b>${rankName(w[i])}</b> &gt; ${nameOf(losers[0])} ${rankName(l[i])}`;
+}
+function cmpScore(a, b) { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; }
+
+// Order the reveal: losers first, the winner last.
+const revealOrder = (g) => Object.keys(g.result.hands).sort((a, b) => cmpScore(g.result.hands[a].score, g.result.hands[b].score));
+
+function renderShowdownPanel(g, meId) {
+  const el = $('#sdPanel');
+  if (g.street !== 'showdown' || !g.result || g.result.uncontested) { el.hidden = true; el.dataset.hand = ''; return; }
+  if (el.dataset.hand === String(g.handNo)) return; // already animating this hand
+  el.dataset.hand = String(g.handNo);
+  const hands = g.result.hands, winIds = new Set(g.result.winners.map((w) => w.id));
+  const order = revealOrder(g);
+  const rows = order.map((id, i) => {
+    const h = hands[id], p = g.players.find((q) => q.id === id), d = i * REVEAL_PER;
+    const core = coreCards(h.cards, h.score);
+    const cards = h.cards.map((c, j) => `<span class="sdc" style="animation-delay:${(d + j * 0.09).toFixed(2)}s">${cardHTML(c, 'sm', (core.has(c) ? 'core' : 'kick') + (p.hole.includes(c) ? ' hole' : ''))}</span>`).join('');
+    return `<div class="sdrow ${winIds.has(id) ? 'win' : 'lose'} ${id === meId ? 'me' : ''}" style="animation-delay:${d}s">
+      <span class="sdname">${esc(p.name)}</span><span class="sdcards">${cards}</span>
+      <span class="sdhand" style="animation-delay:${(d + 0.55).toFixed(2)}s">${h.name}</span>
+      <span class="sdtag" style="animation-delay:${(d + 0.8).toFixed(2)}s">${winIds.has(id) ? 'WIN' : ''}</span>
+    </div>`;
+  }).join('');
+  el.innerHTML = `${rows}<div class="sdwhy" style="animation-delay:${(order.length * REVEAL_PER).toFixed(2)}s">${explain(g)}</div>`;
+  el.hidden = false;
+  if (typeof Scene3D !== 'undefined') Scene3D.tour(order, REVEAL_PER);
+}
 
 let raiseDraft = null; // keep slider value across re-renders of the same decision
 
@@ -234,7 +299,8 @@ function renderTable(ctx) {
   $('#street').textContent = `${STREET_KO[g.street]} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
 
   const banner = $('#banner');
-  if (g.street === 'showdown' && g.result) {
+  renderShowdownPanel(g, ctx.me);
+  if (g.street === 'showdown' && g.result && g.result.uncontested) {
     banner.hidden = false;
     const meIn = g.players.find((p) => p.id === ctx.me);
     banner.className = winIds.has(ctx.me) ? 'win' : meIn && meIn.inHand && !meIn.folded ? 'lose' : '';
@@ -242,7 +308,8 @@ function renderTable(ctx) {
   } else banner.hidden = true;
 
   const myP = g.players.find((p) => p.id === ctx.me);
-  ctx.myLine = myP ? `<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
+  const myCards = myP && myP.hole.length && myP.hole[0] !== '??' ? `<span class="myhand">${myP.hole.map((c) => cardHTML(c, '')).join('')}</span>` : '';
+  ctx.myLine = myP ? `${myCards}<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
   $('#log').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
   $('#log').scrollTop = 1e6;
 
@@ -385,7 +452,8 @@ const Practice = {
         store.del(PRACTICE_KEY);
         return modal('<h2>🏆 우승!</h2><p>모든 봇을 이겼습니다!</p>', [['메뉴로', 'orange', () => show('menu')]]);
       }
-      this.timer = setTimeout(() => this.next(), 5000);
+      const reveal = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 : 0;
+      this.timer = setTimeout(() => this.next(), 5000 + reveal);
     }
   },
   next() {

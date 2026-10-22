@@ -337,7 +337,7 @@
       log(g, `${p.name} ${hands[id].name}로 승리 (+${amount})`);
     }
     const shown = {};
-    for (const p of alive) shown[p.id] = { name: hands[p.id].name, cards: hands[p.id].cards };
+    for (const p of alive) shown[p.id] = { name: hands[p.id].name, cards: hands[p.id].cards, score: hands[p.id].score };
     g.result = { uncontested: false, winners, hands: shown, pots: pots.length };
     g.pot = 0;
     g.street = 'showdown';

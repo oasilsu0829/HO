@@ -20,6 +20,8 @@ const Scene3D = (() => {
   let labelData = [];
   let lastW = 0, lastH = 0;
   let sweep = null;          // win cinematic state
+  let tourState = null;      // showdown close-ups
+  const camCur = new THREE.Vector3(0, 1.5, 1.55), lookCur = new THREE.Vector3(0, 0.95, -0.55);
   let hands = null;
   const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.22);
   const TUCK = new THREE.Vector3(), TUCK_OFF = new THREE.Vector3(0, -0.4, 0.3);
@@ -303,7 +305,7 @@ const Scene3D = (() => {
           if (p.folded) pos.lerp(new THREE.Vector3(0, TABLE_Y + 0.002, -0.45), 0.6);
           const shown = c !== '??';
           // revealed cards are stood up so you can read them
-          if (shown) { pos.y = TABLE_Y + 0.13; setCard(m, c, pos, -0.35, s.yaw * 0.6, 0, d); }
+          if (shown) { pos.y = TABLE_Y + 0.13; setCard(m, c, pos, -0.35, s.yaw * 0.6, 0, d); m.scale.setScalar(1.35); }
           else setCard(m, c, pos, -Math.PI / 2, 0, s.yaw + (i - 0.5) * 0.15, d);
         }
         m.userData.dim = p.folded && !s.me;
@@ -366,7 +368,7 @@ const Scene3D = (() => {
       m.rotation.z += (u.rot.z - m.rotation.z) * k;
       if (u.flip > 0) { u.flip -= dt * 3; m.rotation.y += Math.sin(u.flip * Math.PI) * 0.6; m.position.y += Math.sin(u.flip * Math.PI) * 0.03; }
       m.material.color.setScalar(u.dim ? 0.35 : u.board ? 0.72 : 1);
-      m.material.emissive?.setHex(u.glow ? 0x3a2e10 : 0x000000);
+      m.material.emissive?.setHex(u.glow ? 0x3a2e10 : u.mine && !u.dim ? 0x34322a : 0x000000);
     }
     for (const s of chips.values()) s.position.lerp(s.userData.pos, 1 - Math.pow(0.002, dt));
     for (const f of figures.values()) {
@@ -380,7 +382,11 @@ const Scene3D = (() => {
     // camera: slight breathing, plus shake, plus the win cinematic
     shakeT = Math.max(0, shakeT - dt);
     const amp = shakeAmp * (shakeT > 0 ? shakeT : 0);
-    const cp = camBase.clone(), cl = camLook.clone();
+    const want = camBase.clone(), wantLook = camLook.clone();
+    if (tourState) stepTour(dt, want, wantLook);
+    const kc = 1 - Math.pow(0.015, dt);
+    camCur.lerp(want, kc); lookCur.lerp(wantLook, kc);
+    const cp = camCur.clone(), cl = lookCur.clone();
     if (sweep) stepSweep(dt, cp, cl);
     camera.position.set(
       cp.x + Math.sin(t / 2300) * 0.015 + (Math.random() - 0.5) * amp,
@@ -448,7 +454,23 @@ const Scene3D = (() => {
     }
   }
 
+  // Showdown: swing the camera to each revealed hand in turn, then back to the seat.
+  function tour(ids, per) {
+    const stops = ids.map((id) => seatPos[id]).filter((s) => s && !s.me);
+    if (!stops.length) return;
+    tourState = { stops, per, t: 0 };
+  }
+  function stepTour(dt, want, wantLook) {
+    tourState.t += dt;
+    const i = Math.floor(tourState.t / tourState.per);
+    if (i >= tourState.stops.length) { tourState = null; return; }
+    const tgt = tourState.stops[i].cards.clone().setY(TABLE_Y + 0.13);
+    const back = camBase.clone().sub(tgt).setY(0).normalize();
+    want.copy(tgt).addScaledVector(back, 0.75).setY(TABLE_Y + 0.42);
+    wantLook.copy(tgt);
+  }
+
   function shake(big) { shakeT = big ? 0.8 : 0.35; shakeAmp = big ? 0.12 : 0.04; }
 
-  return { init, update, shake, winSweep };
+  return { init, update, shake, winSweep, tour };
 })();

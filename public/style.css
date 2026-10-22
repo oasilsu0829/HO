@@ -342,3 +342,38 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 }
 .mystack { color: var(--amber); letter-spacing: 1px; }
 #table #log { bottom: 110px; position: fixed; }
+
+/* my hand, always readable in the HUD */
+.myhand { display: inline-flex; gap: 4px; vertical-align: middle; margin-right: 10px; }
+.myhand .card { --w: 46px; animation: none; }
+#actions .info { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+#actions .info:has(.myhand) { flex-direction: row; flex-wrap: wrap; justify-content: center; }
+
+/* showdown breakdown */
+#sdPanel {
+  position: fixed; left: 16px; right: 16px; margin: 0 auto; width: fit-content; bottom: 130px; z-index: 4;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; max-width: calc(100vw - 32px);
+  background: rgba(0,0,0,.82); border: 1px solid var(--line); box-shadow: 0 0 0 2px var(--ink);
+}
+.sdrow { display: flex; align-items: center; gap: 10px; opacity: 0; animation: sdIn .35s ease-out forwards; }
+.sdname { width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+.sdrow.me .sdname { color: var(--bone); }
+.sdcards { display: flex; gap: 3px; }
+.sdc { display: inline-block; opacity: 0; animation: sdFlip .3s ease-out forwards; }
+.sdc .card { animation: none; }
+.sdc { position: relative; flex: none; }
+.sdc .card.kick { filter: brightness(.4) grayscale(.5); }
+.sdc .card.core { box-shadow: 0 0 0 2px var(--ink), 0 0 0 3px var(--bone); }
+.sdrow.win .sdc .card.core { box-shadow: 0 0 0 2px var(--ink), 0 0 0 3px var(--amber), 0 0 14px rgba(216,160,58,.6); }
+.sdc .card.hole::before { content: ''; position: absolute; left: 50%; bottom: -6px; width: 4px; height: 4px; margin-left: -2px; background: var(--sick); }
+.sdhand { min-width: 96px; color: var(--bone); opacity: 0; animation: pop .4s steps(4) forwards; }
+.sdrow.win .sdhand { color: var(--amber); }
+.sdtag { width: 40px; color: var(--amber); letter-spacing: 2px; opacity: 0; animation: sdStamp .5s cubic-bezier(.2,1.6,.4,1) forwards; }
+.sdrow.lose .sdtag { display: none; }
+.sdwhy { border-top: 1px solid var(--line); padding-top: 6px; color: var(--dim); font-size: 13px; text-align: center; opacity: 0; animation: sdIn .4s ease-out forwards; text-wrap: balance; }
+.sdwhy b { color: var(--bone); font-weight: normal; }
+@keyframes sdIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes sdFlip { from { opacity: 0; transform: rotateY(90deg); } to { opacity: 1; transform: none; } }
+@keyframes sdStamp { from { opacity: 0; transform: scale(2.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes pop { from { opacity: 0; transform: scale(.3); } 70% { opacity: 1; transform: scale(1.15); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) { .sdname { width: 48px; font-size: 12px; } .sdc .card.sm { --w: 30px; } .sdhand { min-width: 70px; font-size: 12px; } }

@@ -10,6 +10,7 @@ const PORT = process.env.PORT || 3000;
 const PUB = path.join(__dirname, 'public');
 const SAVE = path.join(__dirname, 'data', 'rooms.json');
 const NEXT_HAND_MS = 5000;
+const REVEAL_MS_PER_HAND = 1300; // matches the client's showdown tour
 const BOT_MS = 900;
 const AWAY_TIMEOUT_MS = 30000; // auto check/fold only for disconnected players
 
@@ -59,7 +60,7 @@ function schedule(room) {
     timers[room.id] = setTimeout(() => {
       if (!P.startHand(g)) { room.running = false; P.isLive(g) || (g.street = 'waiting'); }
       broadcast(room);
-    }, g.street === 'waiting' ? 500 : NEXT_HAND_MS);
+    }, g.street === 'waiting' ? 500 : NEXT_HAND_MS + revealTime(g));
     return;
   }
   const p = g.players[g.toAct];
@@ -74,6 +75,8 @@ function schedule(room) {
     }, AWAY_TIMEOUT_MS);
   }
 }
+
+const revealTime = (g) => (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_MS_PER_HAND : 0);
 
 const newId = (n) => crypto.randomBytes(n).toString('hex');
 function roomCode() {
