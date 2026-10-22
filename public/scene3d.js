@@ -19,6 +19,10 @@ const Scene3D = (() => {
   let seatPos = {};          // playerId -> {figure, cards, chips, label}
   let labelData = [];
   let lastW = 0, lastH = 0;
+  let sweep = null;          // win cinematic state
+  let hands = null;
+  const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.22);
+  const TUCK = new THREE.Vector3(), TUCK_OFF = new THREE.Vector3(0, -0.4, 0.3);
 
   // ---------- textures ----------
   function canvasTex(w, h, draw) {
@@ -146,6 +150,20 @@ const Scene3D = (() => {
     ash.position.set(-1.1, TABLE_Y + 0.02, 0.55); tableGroup.add(ash);
 
     root = new THREE.Group(); scene.add(root);
+    // my hands, only seen when raking in a pot
+    hands = new THREE.Group();
+    const skin = new THREE.MeshLambertMaterial({ color: 0x6f6757 });
+    const sleeve = new THREE.MeshLambertMaterial({ color: 0x1a1c18 });
+    for (const sx of [-1, 1]) {
+      const h = new THREE.Group();
+      const palm = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.035, 0.13), skin); palm.castShadow = true; h.add(palm);
+      for (let f = 0; f < 4; f++) { const fi = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.025, 0.07), skin); fi.position.set(-0.04 + f * 0.027, -0.005, -0.09); fi.castShadow = true; h.add(fi); }
+      const thumb = new THREE.Mesh(new THREE.BoxGeometry(0.025, 0.025, 0.06), skin); thumb.position.set(-sx * 0.065, 0, -0.03); thumb.rotation.y = sx * 0.6; h.add(thumb);
+      const arm = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.09, 0.6), sleeve); arm.position.set(0, 0.02, 0.36); arm.castShadow = true; h.add(arm);
+      h.position.x = sx * 0.17; h.rotation.y = -sx * 0.35;
+      hands.add(h);
+    }
+    hands.visible = false; scene.add(hands);
     window.addEventListener('resize', resize);
     resize();
     requestAnimationFrame(loop);
@@ -289,6 +307,7 @@ const Scene3D = (() => {
           else setCard(m, c, pos, -Math.PI / 2, 0, s.yaw + (i - 0.5) * 0.15, d);
         }
         m.userData.dim = p.folded && !s.me;
+        m.userData.mine = !!s.me;
         m.userData.glow = reveal.has(c);
       });
     });
@@ -310,7 +329,7 @@ const Scene3D = (() => {
     if (g.street === 'showdown' && g.result) {
       for (const w of g.result.winners) {
         const s = seatPos[w.id];
-        if (s) stack(`win-${g.handNo}-${w.id}`, s.chips.clone().setY(TABLE_Y), w.amount, g.bb);
+        if (s && !s.me) stack(`win-${g.handNo}-${w.id}`, s.chips.clone().setY(TABLE_Y), w.amount, g.bb);
       }
     }
     for (const [k, m] of cards) if (!m.userData.seen) { root.remove(m); cards.delete(k); }
@@ -340,7 +359,8 @@ const Scene3D = (() => {
       const u = m.userData;
       if (u.delay > 0) { u.delay -= dt; continue; }
       const k = 1 - Math.pow(0.0008, dt);
-      m.position.lerp(u.pos, k);
+      // my hand drops out of frame while I rake in a pot
+      m.position.lerp(sweep && u.mine ? TUCK.copy(u.pos).add(TUCK_OFF) : u.pos, k);
       m.rotation.x += (u.rot.x - m.rotation.x) * k;
       m.rotation.y += (u.rot.y - m.rotation.y) * k;
       m.rotation.z += (u.rot.z - m.rotation.z) * k;
@@ -357,15 +377,17 @@ const Scene3D = (() => {
       u.eyeMat.opacity += ((u.turn ? 1 : 0) - u.eyeMat.opacity) * 0.15;
     }
 
-    // camera: slight breathing, plus shake
+    // camera: slight breathing, plus shake, plus the win cinematic
     shakeT = Math.max(0, shakeT - dt);
     const amp = shakeAmp * (shakeT > 0 ? shakeT : 0);
+    const cp = camBase.clone(), cl = camLook.clone();
+    if (sweep) stepSweep(dt, cp, cl);
     camera.position.set(
-      camBase.x + Math.sin(t / 2300) * 0.015 + (Math.random() - 0.5) * amp,
-      camBase.y + Math.sin(t / 1700) * 0.01 + (Math.random() - 0.5) * amp,
-      camBase.z,
+      cp.x + Math.sin(t / 2300) * 0.015 + (Math.random() - 0.5) * amp,
+      cp.y + Math.sin(t / 1700) * 0.01 + (Math.random() - 0.5) * amp,
+      cp.z,
     );
-    camera.lookAt(camLook.x + (Math.random() - 0.5) * amp * 0.5, camLook.y, camLook.z);
+    camera.lookAt(cl.x + (Math.random() - 0.5) * amp * 0.5, cl.y, cl.z);
     renderer.render(scene, camera);
 
     // pin HTML labels over the 3D heads
@@ -378,7 +400,55 @@ const Scene3D = (() => {
     }
   }
 
+  const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+  const seg = (t, a, b) => ease((t - a) / (b - a));
+
+  // Win cinematic: camera leans in over the felt, hands reach out and drag the pile home.
+  function winSweep(amount, bb) {
+    if (sweep) { root.remove(sweep.pile); }
+    const pile = new THREE.Group();
+    const n = Math.min(40, Math.max(8, Math.round(Math.log2(amount / bb + 1) * 6)));
+    for (let i = 0; i < n; i++) {
+      const col = [0x8f1d14, 0xc9c2a8, 0x8f1d14, 0x1b1d1a][i % 4];
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(0.034, 0.034, 0.011, 10), new THREE.MeshLambertMaterial({ color: col }));
+      const col3 = i % 5, h = Math.floor(i / 5);
+      c.position.set((col3 - 2) * 0.075 + (Math.random() - 0.5) * 0.02, 0.006 + (h % 6) * 0.012, (Math.floor(h / 6) - 0.5) * 0.08 + (Math.random() - 0.5) * 0.02);
+      c.castShadow = true; pile.add(c);
+    }
+    pile.position.copy(POT_POS);
+    root.add(pile);
+    for (const [k, st] of chips) if (k === 'pot') st.visible = false;
+    sweep = { t: 0, pile };
+    hands.visible = true;
+  }
+
+  function stepSweep(dt, cp, cl) {
+    sweep.t += dt;
+    const t = sweep.t;
+    // camera: lean in (0-0.7), hold, pull back (2.3-3.1)
+    const camIn = seg(t, 0, 0.7) * (1 - seg(t, 2.3, 3.1));
+    cp.lerp(new THREE.Vector3(0.12, 1.2, 1.05), camIn);
+    cl.lerp(new THREE.Vector3(0, TABLE_Y, 0.3), camIn);
+    // hands: reach to the pile (0.3-0.9), rake back (1.1-2.1), drop away (2.2-2.8)
+    const reach = seg(t, 0.3, 0.9), rake = seg(t, 1.1, 2.1), away = seg(t, 2.2, 2.8);
+    const startZ = 1.35, pileZ = POT_POS.z + 0.12, homeZ = 0.92;
+    const z = startZ + (pileZ - startZ) * reach + (homeZ - pileZ) * rake + 0.4 * away;
+    hands.position.set(0, TABLE_Y + 0.025 - away * 0.25 + Math.sin(reach * Math.PI) * 0.03, z);
+    hands.children[0].position.x = -0.17 - 0.06 * (1 - rake) + 0.06 * reach;
+    hands.children[1].position.x = 0.17 + 0.06 * (1 - rake) - 0.06 * reach;
+    // the pile gets dragged along, squeezing together
+    sweep.pile.position.z = POT_POS.z + (homeZ - 0.1 - POT_POS.z) * rake;
+    sweep.pile.scale.x = 1 - rake * 0.35;
+    if (rake > 0 && rake < 1 && !sweep.clacked) { sweep.clacked = true; if (window.FX) FX.sfx('chip'); }
+    if (t > 3.2) {
+      hands.visible = false;
+      root.remove(sweep.pile);
+      for (const [k, st] of chips) if (k === 'pot') st.visible = true;
+      sweep = null;
+    }
+  }
+
   function shake(big) { shakeT = big ? 0.8 : 0.35; shakeAmp = big ? 0.12 : 0.04; }
 
-  return { init, update, shake };
+  return { init, update, shake, winSweep };
 })();

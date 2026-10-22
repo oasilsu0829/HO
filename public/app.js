@@ -69,6 +69,7 @@ $('#rankList').innerHTML = RANK_EXAMPLES.map(([n, cs]) => `<li><span class="nm">
 
 
 // ---------- tension & impact: synthesized sound, shake, flash ----------
+
 const FX = {
   ac: null, on: store.get('ho.sound') !== false, heartTimer: null,
   audio() {
@@ -122,6 +123,10 @@ const FX = {
     const s = $('#stamp'); s.textContent = text; s.style.color = color || '';
     s.classList.remove('go'); void s.offsetWidth; s.classList.add('go');
   },
+  sweep(g, winners, me) {
+    const w = winners.find((x) => x.id === me.id);
+    if (w && typeof Scene3D !== 'undefined' && Scene3D.winSweep) Scene3D.winSweep(w.amount, g.bb);
+  },
   tense(on) {
     document.body.classList.toggle('tense', on);
     if (on && !this.heartTimer) { this.sfx('heart'); this.heartTimer = setInterval(() => this.sfx('heart'), 900); }
@@ -153,8 +158,10 @@ const FX = {
             this.sfx('blast'); this.shake(true); this.flash('rgba(210,48,31,.85)'); this.stamp('탕!');
           } else if (iWon && me.allIn) {
             this.sfx('click');
+            this.sweep(g, winners, me);
             setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); this.stamp(big ? 'JACKPOT' : '생존', 'var(--amber)'); }, 500);
           } else if (iWon) {
+            this.sweep(g, winners, me);
             this.sfx('win'); this.flash('rgba(216,160,58,.4)'); if (big) this.stamp('JACKPOT', 'var(--amber)');
           } else if (iWasIn) {
             this.sfx('lose'); this.flash('rgba(143,29,20,.4)');
@@ -170,6 +177,7 @@ const FX = {
     this.tense(Poker.isLive(g) && ((myTurn && toCall > 0 && toCall >= me.chips * 0.3) || allInVsMe || (me.allIn && !me.folded)));
   },
 };
+window.FX = FX;
 const syncSound = () => ($('#btnSound').textContent = FX.on ? '소리 ON' : '소리 OFF');
 $('#btnSound').onclick = () => { FX.on = !FX.on; store.set('ho.sound', FX.on); if (!FX.on) FX.tense(false); syncSound(); };
 syncSound();
