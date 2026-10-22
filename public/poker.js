@@ -90,6 +90,20 @@
     };
   }
 
+  // Bot personalities: how tight, how aggressive, how often they bluff, how well they read and hide.
+  const PERSONAS = [
+    { key: 'rock', name: '바위', tight: 0.8, aggr: 0.25, bluff: 0.05, skill: 0.5 },
+    { key: 'shark', name: '상어', tight: 0.6, aggr: 0.75, bluff: 0.3, skill: 0.9 },
+    { key: 'maniac', name: '미치광이', tight: 0.1, aggr: 0.95, bluff: 0.55, skill: 0.35 },
+    { key: 'station', name: '콜중독', tight: 0.2, aggr: 0.15, bluff: 0.08, skill: 0.2 },
+    { key: 'fox', name: '여우', tight: 0.45, aggr: 0.55, bluff: 0.4, skill: 0.8 },
+  ];
+  function personaOf(p) {
+    if (p.style) return p.style;
+    let h = 0; for (const ch of String(p.id)) h = (h * 31 + ch.charCodeAt(0)) % 997;
+    return PERSONAS[h % PERSONAS.length];
+  }
+
   function addPlayer(g, { id, name, bot = false }) {
     const p = {
       id, name, bot,
@@ -98,6 +112,7 @@
       bet: 0, total: 0, acted: false, inHand: false,
       lastAction: '',
     };
+    if (bot) p.style = PERSONAS[g.players.filter((q) => q.bot).length % PERSONAS.length];
     g.players.push(p);
     return p;
   }
@@ -118,6 +133,11 @@
     } else {
       p.leaving = true;
     }
+  }
+
+  function statOf(g, id) {
+    g.stats = g.stats || {};
+    return (g.stats[id] = g.stats[id] || { hands: 0, vpip: 0, agg: 0, pas: 0, faced: 0, foldBet: 0, bluffs: 0 });
   }
 
   const isLive = (g) => ['preflop', 'flop', 'turn', 'river'].includes(g.street);
@@ -165,10 +185,12 @@
     g.pot = 0;
     g.result = null;
     for (const p of g.players) {
-      p.hole = []; p.bet = 0; p.total = 0; p.acted = false; p.allIn = false; p.lastAction = '';
+      p.hole = []; p.bet = 0; p.total = 0; p.acted = false; p.allIn = false; p.lastAction = ''; p.say = null; p.tell = '';
       p.inHand = p.chips > 0 && !p.sitOut;
       p.folded = !p.inHand;
     }
+    g.aggressor = null; g.lastAggressor = null;
+    for (const p of g.players) if (p.inHand) statOf(g, p.id).hands++;
     g.dealer = nextIdx(g, g.dealer, (p) => p.inHand);
     let sbI, bbI;
     if (seated.length === 2) {
@@ -218,6 +240,11 @@
     if (type === 'raise' && !L.canRaise) type = L.canCheck ? 'check' : 'call';
     if (type === 'allin') { type = L.canRaise ? 'raise' : 'call'; action = { type, amount: L.maxTo }; }
 
+    const st = statOf(g, p.id);
+    if (L.toCall > 0) { st.faced++; if (type === 'fold') st.foldBet++; }
+    if (type === 'raise') st.agg++; else if (type === 'call') st.pas++;
+    if (g.street === 'preflop' && (type === 'call' || type === 'raise') && p.vpipHand !== g.handNo) { p.vpipHand = g.handNo; st.vpip++; }
+
     if (type === 'fold') {
       p.folded = true; p.lastAction = '다이';
       log(g, `${p.name} 다이`);
@@ -237,12 +264,15 @@
       const wasBet = g.currentBet === 0;
       g.currentBet = to;
       for (const q of g.players) if (q !== p && canAct(q)) q.acted = false;
+      g.aggressor = p.id; g.lastAggressor = p.id;
       p.lastAction = p.allIn ? '올인' : wasBet ? '벳' : '레이즈';
       log(g, `${p.name} ${p.lastAction} ${to}`);
     } else {
       return { ok: false, error: '알 수 없는 액션' };
     }
     p.acted = true;
+    p.say = action.say ? { text: String(action.say).slice(0, 40), seq: g.logSeq } : null;
+    p.tell = action.tell || '';
     advance(g);
     return { ok: true };
   }
@@ -270,6 +300,7 @@
       for (const p of g.players) { g.pot += p.bet; p.bet = 0; p.acted = false; }
       g.currentBet = 0;
       g.minRaise = g.bb;
+      g.aggressor = null;
       if (g.street === 'river') return showdown(g);
       if (g.street === 'preflop') { g.board.push(g.deck.pop(), g.deck.pop(), g.deck.pop()); g.street = 'flop'; }
       else if (g.street === 'flop') { g.board.push(g.deck.pop()); g.street = 'turn'; }
@@ -338,7 +369,11 @@
     }
     const shown = {};
     for (const p of alive) shown[p.id] = { name: hands[p.id].name, cards: hands[p.id].cards, score: hands[p.id].score };
-    g.result = { uncontested: false, winners, hands: shown, pots: pots.length };
+    // the last bettor turning over a pair or worse without winning got caught bluffing
+    let bluffer = null;
+    const la = alive.find((p) => p.id === g.lastAggressor);
+    if (la && hands[la.id].score[0] <= 1 && !won[la.id]) { bluffer = la.id; statOf(g, la.id).bluffs++; }
+    g.result = { uncontested: false, winners, hands: shown, pots: pots.length, bluffer };
     g.pot = 0;
     g.street = 'showdown';
     g.toAct = -1;
@@ -391,28 +426,92 @@
     return score / sims;
   }
 
+  const LINES = {
+    value: ['들어와 봐.', '이번엔 진짜야.', '…', '콜하면 후회할걸.', '받아.'],
+    nervous: ['어… 벳.', '음… 이 정도면…', '…(침을 삼킨다)', '그, 그냥 벳.'],
+    call: ['보자.', '따라간다.', '흠…', '안 믿어.', '네 패 보고 싶네.'],
+    fold: ['가져가.', '다음 판에 보자.', '쳇.', '…운 좋네.'],
+    allin: ['전부 건다.', '죽거나 살거나.', '올인이다.', '여기서 끝내자.'],
+    check: ['체크.', '네 차례.', '…'],
+    trap: ['체크.', '…글쎄.', '조용히 가자.'],
+    hero: ['너 블러핑이지.', '그 표정 다 보여.', '안 속아.'],
+  };
+  const pick = (a) => a[Math.floor(Math.random() * a.length)];
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  // Returns { type, amount?, think (ms), say?, tell? }.
   function botDecide(g, id) {
     const L = legal(g, id);
     if (!L) return null;
     const p = g.players.find((q) => q.id === id);
-    const opponents = g.players.filter((q) => q.inHand && !q.folded && q !== p).length;
-    const eq = equity(p.hole, g.board, Math.max(1, opponents), 200);
-    const potOdds = L.toCall > 0 ? L.toCall / (L.pot + L.toCall) : 0;
+    const P = personaOf(p);
+    const opps = g.players.filter((q) => q.inHand && !q.folded && q !== p);
+    const n = Math.max(1, opps.length);
+    const eq = equity(p.hole, g.board, n, 220);
+    const fair = 1 / (n + 1);
+    const strength = clamp((eq - fair) / (1 - fair), -1, 1); // 0 = average hand here, 1 = the nuts
     const r = Math.random();
-    const raiseTo = (frac) => Math.max(L.minTo, Math.min(L.maxTo, g.currentBet + Math.floor((L.pot * frac) / g.bb) * g.bb));
-    const strong = 1 / (opponents + 1) + 0.25;
 
-    if (L.canRaise && (eq > strong + 0.15 || (eq > strong && r < 0.5))) {
-      if (eq > 0.85 && r < 0.3) return { type: 'allin' };
-      return { type: 'raise', amount: raiseTo(0.5 + r) };
+    // read whoever is betting into us (or the table)
+    const target = (g.aggressor && g.aggressor !== id ? [g.aggressor] : opps.map((o) => o.id)).map((x) => statOf(g, x));
+    const avg = (f) => target.reduce((s, t) => s + f(t), 0) / Math.max(1, target.length);
+    const oppAgg = avg((t) => (t.agg + 1) / (t.agg + t.pas + 3));
+    const oppFold = avg((t) => (t.foldBet + 1) / (t.faced + 3));
+    const oppBluffy = avg((t) => Math.min(1, t.bluffs / (t.hands * 0.1 + 1)));
+    const read = L.toCall > 0 ? P.skill * ((oppAgg - 0.4) * 0.12 + oppBluffy * 0.15) : 0;
+    const effEq = eq + read;
+
+    // fear: how much of what's left this call would cost, softened if already pot-committed
+    const stack = p.chips + p.bet;
+    const risk = L.toCall / Math.max(1, p.chips);
+    const committed = p.total / Math.max(1, p.total + p.chips);
+    const potOdds = L.toCall > 0 ? L.toCall / (L.pot + L.toCall) : 0;
+    const fear = Math.pow(Math.min(1, risk), 1.3) * (0.22 - 0.14 * P.aggr) * (1 - committed);
+    const need = potOdds + P.tight * 0.05 + fear;
+
+    const size = (frac) => clamp(g.currentBet + Math.max(g.bb, Math.round((L.pot * frac) / g.bb) * g.bb), L.minTo, L.maxTo);
+    const leaky = Math.random() > P.skill; // weak players give away their hand
+    const talk = (kind, prob = 0.4) => (Math.random() < prob ? pick(LINES[kind]) : null);
+    const closeness = 1 - Math.min(1, Math.abs(effEq - need) * 5);
+    const big = Math.min(1, (L.toCall + L.pot * 0.3) / Math.max(1, stack));
+    const tank = () => 700 + Math.random() * 600 + 4200 * closeness * big;
+    const quick = () => 500 + Math.random() * 600;
+    let d;
+
+    if (p.chips / g.bb < 10 && L.canRaise) {
+      // short stack: shove or get out
+      if (effEq > fair + 0.12 - P.aggr * 0.08) d = { type: 'allin', say: talk('allin', 0.7), think: tank() + 800 };
+      else d = L.canCheck ? { type: 'check', think: quick() } : effEq >= need ? { type: 'call', think: tank() } : { type: 'fold', say: talk('fold', 0.3), think: tank() };
+    } else if (L.canCheck) {
+      const postflop = g.street === 'flop' || g.street === 'turn';
+      if (strength > 0.75 && postflop && r < (1 - P.aggr) * 0.45) {
+        d = { type: 'check', say: talk('trap', 0.3), think: quick() + 400 }; // slow-play the monster
+      } else if (strength > 0.4 - P.aggr * 0.15) {
+        d = { type: 'raise', amount: size(0.45 + 0.35 * Math.random() + P.aggr * 0.25), think: quick() + 300,
+          say: talk(leaky ? 'value' : pick(['value', 'nervous'])), tell: !leaky && Math.random() < 0.2 ? 'shaky' : '' };
+      } else if (postflop && eq > fair * 0.8 && r < P.aggr * 0.35) {
+        d = { type: 'raise', amount: size(0.5 + Math.random() * 0.2), think: quick() + 500, say: talk('value', 0.25) }; // semi-bluff a draw
+      } else if (r < P.bluff * (0.4 + oppFold) * (n === 1 ? 1 : 0.35) * (g.street === 'river' ? 1.3 : 0.8)) {
+        d = { type: 'raise', amount: size(P.aggr > 0.8 ? 1.1 : 0.6 + 0.3 * Math.random()), bluff: true,
+          think: leaky ? 300 + Math.random() * 300 : quick() + 400, // nervous bluffers fire too fast
+          say: talk(leaky ? 'nervous' : 'value', 0.5), tell: leaky ? (Math.random() < 0.7 ? 'shaky' : '') : '' };
+      } else d = { type: 'check', say: talk('check', 0.15), think: quick() };
+    } else {
+      if (L.canRaise && strength > 0.6 + P.tight * 0.12 - P.aggr * 0.1 && r < 0.4 + P.aggr * 0.5) {
+        d = strength > 0.85 && (risk > 0.4 || r < 0.25)
+          ? { type: 'allin', say: talk('allin', 0.7), think: tank() + 600 }
+          : { type: 'raise', amount: size(0.7 + P.aggr * 0.4), say: talk('value'), think: tank(), tell: !leaky && Math.random() < 0.2 ? 'shaky' : '' };
+      } else if (L.canRaise && risk < 0.25 && r < P.bluff * P.aggr * 0.6 * oppFold) {
+        d = { type: 'raise', amount: size(0.8), bluff: true, think: tank(), say: talk(leaky ? 'nervous' : 'value', 0.5), tell: leaky ? 'shaky' : '' };
+      } else if (effEq >= need) {
+        d = { type: 'call', think: tank(), say: read > 0.04 && effEq - read < need ? pick(LINES.hero) : talk('call', 0.3) };
+      } else d = { type: 'fold', say: talk('fold', 0.35), think: tank() };
     }
-    if (L.canRaise && L.canCheck && r < 0.08) return { type: 'raise', amount: raiseTo(0.6) }; // bluff
-    if (L.canCheck) return { type: 'check' };
-    if (eq > potOdds + 0.03 || (L.toCall <= g.bb && eq > 0.2)) return { type: 'call' };
-    return { type: 'fold' };
+    d.think = Math.round(clamp(d.think, 300, 6000));
+    return d;
   }
 
-  const api = { createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  const api = { PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);

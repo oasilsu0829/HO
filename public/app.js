@@ -15,7 +15,7 @@ let mode = null; // 'practice' | 'online'
 
 // ---------- navigation ----------
 function show(id) {
-  if (id !== 'table' && typeof FX !== 'undefined') { FX.tense(false); FX.lastSeq = null; FX.lastHand = null; }
+  if (id !== 'table' && typeof FX !== 'undefined') { FX.tense(false); FX.lastSeq = null; FX.lastHand = null; FX.drone(0); }
   document.querySelectorAll('.screen').forEach((s) => (s.hidden = s.id !== id));
   if (id === 'menu') refreshContinue();
   if (id === 'lobby') loadRooms();
@@ -127,6 +127,28 @@ const FX = {
     const w = winners.find((x) => x.id === me.id);
     if (w && typeof Scene3D !== 'undefined' && Scene3D.winSweep) Scene3D.winSweep(w.amount, g.bb);
   },
+  // garbled murmur for table talk, one blip per syllable
+  voice(text, seed) {
+    if (!this.audio()) return;
+    const base = 90 + (seed % 7) * 18;
+    [...text].filter((ch) => ch.trim()).slice(0, 14).forEach((ch, i) => setTimeout(() => this.tone(base + (ch.charCodeAt(0) % 9) * 9, 0.07, 0.12, 'square'), i * 75));
+  },
+  droneNodes: null,
+  drone(level) {
+    const ac = this.audio();
+    if (!ac) { if (this.droneNodes) this.droneNodes.g.gain.value = 0; return; }
+    if (!this.droneNodes) {
+      const g = ac.createGain(); g.gain.value = 0;
+      const f = ac.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 220;
+      for (const fr of [41, 41.6, 61.5]) { const o = ac.createOscillator(); o.type = 'sawtooth'; o.frequency.value = fr; o.connect(f); o.start(); }
+      f.connect(g).connect(ac.destination);
+      this.droneNodes = { g, f };
+    }
+    const target = this.on ? Math.min(0.09, level * 0.09) : 0;
+    this.droneNodes.g.gain.setTargetAtTime(target, ac.currentTime, 0.8);
+    this.droneNodes.f.frequency.setTargetAtTime(180 + level * 400, ac.currentTime, 0.8);
+  },
+  lastVoice: 0,
   tense(on) {
     document.body.classList.toggle('tense', on);
     if (on && !this.heartTimer) { this.sfx('heart'); this.heartTimer = setInterval(() => this.sfx('heart'), 900); }
@@ -170,11 +192,21 @@ const FX = {
         break;
       }
     }
+    // bots muttering at the table
+    for (const p of g.players) if (p.say && p.say.seq > this.lastVoice && p.id !== me.id) { this.voice(p.say.text, p.name.length + p.say.seq); }
+    this.lastVoice = Math.max(this.lastVoice, ...g.players.map((p) => p.say?.seq || 0));
+    // low drone that swells with the pot relative to the stacks
+    const potNow = g.pot + g.players.reduce((s, p) => s + p.bet, 0);
+    const avgStack = g.players.reduce((s, p) => s + p.chips + p.total, 0) / Math.max(1, g.players.length);
+    this.drone(Poker.isLive(g) ? Math.min(1, potNow / Math.max(1, avgStack)) : 0);
     // heartbeat when the decision is heavy: big call relative to stack, or someone is all-in against you
     const myTurn = g.players[g.toAct]?.id === me.id;
     const toCall = myTurn ? g.currentBet - me.bet : 0;
     const allInVsMe = Poker.isLive(g) && me.inHand && !me.folded && g.players.some((p) => p.allIn && !p.folded && p.inHand);
-    this.tense(Poker.isLive(g) && ((myTurn && toCall > 0 && toCall >= me.chips * 0.3) || allInVsMe || (me.allIn && !me.folded)));
+    const heavy = Poker.isLive(g) && ((myTurn && toCall > 0 && toCall >= me.chips * 0.3) || allInVsMe || (me.allIn && !me.folded));
+    this.tense(heavy);
+    // while you sweat a big decision the camera creeps toward whoever bet
+    if (typeof Scene3D !== 'undefined') Scene3D.stare(myTurn && toCall > 0 && toCall >= me.chips * 0.15 ? g.aggressor : null);
   },
 };
 window.FX = FX;
@@ -216,10 +248,17 @@ function explain(g) {
   if (!ws.length) return '';
   const losers = Object.keys(hands).filter((id) => !winIds.has(id))
     .sort((a, b) => cmpScore(hands[b].score, hands[a].score));
-  if (!losers.length) return `${ws.map((w) => nameOf(w.id)).join(', ')} — 같은 패라서 팟을 나눕니다`;
+  const notes = [];
+  const suitCount = {}; for (const c of g.board) suitCount[c[1]] = (suitCount[c[1]] || 0) + 1;
+  const flushes = Object.values(hands).filter((h) => h.score[0] === 5 || h.score[0] === 8).length;
+  const [fs, fn] = Object.entries(suitCount).sort((a, b) => b[1] - a[1])[0] || [];
+  if (flushes >= 2 && fn >= 3) notes.push(`보드에 ${SUIT_CH[fs]}가 ${fn}장 → ${SUIT_CH[fs]} ${5 - fn}장만 있어도 플러시`);
+  if (r.bluffer) notes.push(`<b>${nameOf(r.bluffer)}</b> 블러핑 들킴!`);
+  const tail = notes.length ? `<br><small>${notes.join(' · ')}</small>` : '';
+  if (!losers.length) return `${ws.map((w) => nameOf(w.id)).join(', ')} — 같은 패라서 팟을 나눕니다${tail}`;
   const w = hands[ws[0].id].score, l = hands[losers[0]].score;
   const who = `<b>${nameOf(ws[0].id)}</b>${ws.length > 1 ? ' 외' : ''}`;
-  if (w[0] !== l[0]) return `${who}의 <b>${hands[ws[0].id].name}</b>가 ${nameOf(losers[0])}의 ${hands[losers[0]].name}보다 높은 족보`;
+  if (w[0] !== l[0]) return `${who}의 <b>${hands[ws[0].id].name}</b>가 ${nameOf(losers[0])}의 ${hands[losers[0]].name}보다 높은 족보${tail}`;
   let i = 1; while (i < w.length && w[i] === l[i]) i++;
   const cat = w[0];
   const label = ({
@@ -228,7 +267,7 @@ function explain(g) {
     3: i === 1 ? '트리플 숫자' : '키커', 4: '스트레이트 꼭대기', 8: '스트레이트 꼭대기',
     6: i === 1 ? '트리플 숫자' : '페어 숫자', 7: i === 1 ? '포카드 숫자' : '키커',
   })[cat];
-  return `둘 다 <b>${hands[ws[0].id].name}</b> → ${label} 비교: ${who} <b>${rankName(w[i])}</b> &gt; ${nameOf(losers[0])} ${rankName(l[i])}`;
+  return `둘 다 <b>${hands[ws[0].id].name}</b> → ${label} 비교: ${who} <b>${rankName(w[i])}</b> &gt; ${nameOf(losers[0])} ${rankName(l[i])}${tail}`;
 }
 function cmpScore(a, b) { for (let i = 0; i < Math.max(a.length, b.length); i++) { const d = (a[i] || 0) - (b[i] || 0); if (d) return d; } return 0; }
 
@@ -245,7 +284,7 @@ function renderShowdownPanel(g, meId) {
   const rows = order.map((id, i) => {
     const h = hands[id], p = g.players.find((q) => q.id === id), d = i * REVEAL_PER;
     const core = coreCards(h.cards, h.score);
-    const cards = h.cards.map((c, j) => `<span class="sdc" style="animation-delay:${(d + j * 0.09).toFixed(2)}s">${cardHTML(c, 'sm', (core.has(c) ? 'core' : 'kick') + (p.hole.includes(c) ? ' hole' : ''))}</span>`).join('');
+    const cards = h.cards.map((c, j) => `<span class="sdc" style="animation-delay:${(d + j * 0.09).toFixed(2)}s">${cardHTML(c, 'sm', (core.has(c) ? 'core' : 'kicker') + (p.hole.includes(c) ? ' hole' : ''))}</span>`).join('');
     return `<div class="sdrow ${winIds.has(id) ? 'win' : 'lose'} ${id === meId ? 'me' : ''}" style="animation-delay:${d}s">
       <span class="sdname">${esc(p.name)}</span><span class="sdcards">${cards}</span>
       <span class="sdhand" style="animation-delay:${(d + 0.55).toFixed(2)}s">${h.name}</span>
@@ -284,7 +323,8 @@ function renderTable(ctx) {
       return `<div class="${cls.join(' ')}">
         ${i === g.dealer && g.street !== 'waiting' ? '<div class="dealer">D</div>' : ''}
         ${p.lastAction ? `<div class="badge ${badgeCls}">${p.lastAction}</div>` : ''}
-        <div class="name">${esc(p.name)}</div>
+        ${p.say && p.say.seq >= (g.logSeq || 0) - 1 && Poker.isLive(g) ? `<div class="bubble">${esc(p.say.text)}</div>` : ''}
+        <div class="name">${esc(p.name)}${p.bot ? `<span class="persona">${Poker.personaOf(p).name}</span>` : ''}</div>
         <div class="chips">$${fmt(p.chips)}${p.bet ? ` <span class="betamt">▸${fmt(p.bet)}</span>` : ''}</div>
         ${shown[p.id] ? `<div class="handname">${shown[p.id].name}</div>` : ''}
         ${p.chips === 0 && !p.inHand ? '<div class="handname">파산</div>' : ''}
@@ -427,7 +467,7 @@ const Practice = {
       onAction: (a) => { const r = Poker.applyAction(g, 'me', a); if (!r.ok) toast(r.error); this.tick(); },
       showdownMsg: '다음 핸드 준비 중…',
       extraButtons: () => {
-        if (g.street !== 'showdown') return [];
+        if (g.street !== 'showdown' || me.chips === 0) return [];
         const b = document.createElement('button');
         b.className = 'btn orange'; b.textContent = '다음 핸드 ▶';
         b.onclick = () => this.next();
@@ -437,18 +477,24 @@ const Practice = {
     renderTable(ctx);
     if (Poker.isLive(g)) {
       const p = g.players[g.toAct];
-      if (p.bot) this.timer = setTimeout(() => { Poker.applyAction(g, p.id, Poker.botDecide(g, p.id)); this.tick(); }, 700 + Math.random() * 500);
+      if (p.bot) { const d = Poker.botDecide(g, p.id); this.timer = setTimeout(() => { Poker.applyAction(g, p.id, d); this.tick(); }, d.think); }
       return;
     }
     if (g.street === 'showdown') {
       const alive = g.players.filter((p) => p.chips > 0);
+      // let the reveal and the shot play before any popup covers the table
+      const revealMs = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500;
       if (me.chips === 0) {
+        if (!this.bustShown) { this.bustShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
+        this.bustShown = false;
         return modal('<h2>파산!</h2><p>칩을 모두 잃었습니다.</p>', [
           ['메뉴로', 'gray', () => { store.del(PRACTICE_KEY); show('menu'); }],
           ['리바이', 'orange', () => { me.chips = g.startChips; this.next(); }],
         ]);
       }
       if (alive.length === 1) {
+        if (!this.winShown) { this.winShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
+        this.winShown = false;
         store.del(PRACTICE_KEY);
         return modal('<h2>🏆 우승!</h2><p>모든 봇을 이겼습니다!</p>', [['메뉴로', 'orange', () => show('menu')]]);
       }

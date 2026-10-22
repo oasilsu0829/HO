@@ -21,6 +21,7 @@ const Scene3D = (() => {
   let lastW = 0, lastH = 0;
   let sweep = null;          // win cinematic state
   let tourState = null;      // showdown close-ups
+  let stareId = null, stareAmt = 0;
   const camCur = new THREE.Vector3(0, 1.5, 1.55), lookCur = new THREE.Vector3(0, 0.95, -0.55);
   let hands = null;
   const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.22);
@@ -284,6 +285,8 @@ const Scene3D = (() => {
       f.userData.target = s.figure; f.rotation.y = s.yaw;
       f.userData.turn = g.players[g.toAct]?.id === p.id;
       f.userData.out = (p.folded && g.street !== 'waiting') || (p.chips === 0 && !p.inHand);
+      f.userData.shaky = p.tell === 'shaky' && !p.folded && g.street !== 'showdown';
+      f.userData.thinking = f.userData.turn;
     }
     for (const [id, f] of figures) if (!live.has(id)) { scene.remove(f); figures.delete(id); }
 
@@ -375,7 +378,10 @@ const Scene3D = (() => {
       const u = f.userData;
       f.position.lerp(u.target, 0.1);
       u.head.position.y = 1.58 + Math.sin(t / 900 + u.bob) * 0.008 - (u.out ? 0.08 : 0);
-      u.head.rotation.x = u.out ? 0.35 : u.turn ? -0.08 : 0;
+      u.head.rotation.x = u.out ? 0.35 : u.turn ? -0.08 + Math.sin(t / 600) * 0.04 : 0;
+      // a tell: the head and hands tremble
+      u.head.rotation.z = u.shaky ? Math.sin(t / 38) * 0.03 : 0;
+      u.head.position.x = u.shaky ? Math.sin(t / 45) * 0.004 : 0;
       u.eyeMat.opacity += ((u.turn ? 1 : 0) - u.eyeMat.opacity) * 0.15;
     }
 
@@ -384,6 +390,14 @@ const Scene3D = (() => {
     const amp = shakeAmp * (shakeT > 0 ? shakeT : 0);
     const want = camBase.clone(), wantLook = camLook.clone();
     if (tourState) stepTour(dt, want, wantLook);
+    else {
+      stareAmt += ((stareId && seatPos[stareId] && !seatPos[stareId].me ? 1 : 0) - stareAmt) * Math.min(1, dt * (stareId ? 0.18 : 1.5));
+      if (stareAmt > 0.001 && stareId && seatPos[stareId]?.figure) {
+        const head = seatPos[stareId].figure.clone().setY(1.55);
+        want.lerp(head, 0.32 * stareAmt).setY(want.y - 0.05 * stareAmt);
+        wantLook.lerp(head, 0.6 * stareAmt);
+      }
+    }
     const kc = 1 - Math.pow(0.015, dt);
     camCur.lerp(want, kc); lookCur.lerp(wantLook, kc);
     const cp = camCur.clone(), cl = lookCur.clone();
@@ -472,5 +486,7 @@ const Scene3D = (() => {
 
   function shake(big) { shakeT = big ? 0.8 : 0.35; shakeAmp = big ? 0.12 : 0.04; }
 
-  return { init, update, shake, winSweep, tour };
+  function stare(id) { stareId = id || null; }
+
+  return { init, update, shake, winSweep, tour, stare };
 })();

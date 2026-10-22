@@ -66,7 +66,8 @@ function schedule(room) {
   const p = g.players[g.toAct];
   if (!p) return;
   if (p.bot) {
-    timers[room.id] = setTimeout(() => { P.applyAction(g, p.id, P.botDecide(g, p.id)); broadcast(room); }, BOT_MS);
+    const d = P.botDecide(g, p.id);
+    timers[room.id] = setTimeout(() => { P.applyAction(g, p.id, d); broadcast(room); }, d ? d.think : BOT_MS);
   } else if (!online(room, p.id)) {
     timers[room.id] = setTimeout(() => {
       const L = P.legal(g, p.id);
