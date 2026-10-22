@@ -255,7 +255,8 @@ const FX = {
     const myTurn = g.players[g.toAct]?.id === me.id;
     const toCall = myTurn ? g.currentBet - me.bet : 0;
     const allInVsMe = Poker.isLive(g) && me.inHand && !me.folded && g.players.some((p) => p.allIn && !p.folded && p.inHand);
-    const heavy = Poker.isLive(g) && ((myTurn && toCall > 0 && toCall >= me.chips * 0.3) || allInVsMe || (me.allIn && !me.folded));
+    const doomedNow = g.mode === 'death' && Poker.isLive(g) && !me.dead && (lowestAlive(g) || []).some((p) => p.id === me.id) && handInRound(g) >= g.roundLen - 1;
+    const heavy = Poker.isLive(g) && ((myTurn && toCall > 0 && toCall >= me.chips * 0.3) || allInVsMe || (me.allIn && !me.folded) || doomedNow);
     this.tense(heavy);
     // while you sweat a big decision the camera creeps toward whoever bet
     if (typeof Scene3D !== 'undefined') Scene3D.stare(myTurn && toCall > 0 && toCall >= me.chips * 0.15 ? g.aggressor : null);
@@ -331,6 +332,12 @@ function cmpScore(a, b) { for (let i = 0; i < Math.max(a.length, b.length); i++)
 // Order the reveal: losers first, the winner last.
 const revealOrder = (g) => Object.keys(g.result.hands).sort((a, b) => cmpScore(g.result.hands[a].score, g.result.hands[b].score));
 
+function deathNote(g) {
+  const d = g.result?.deathInfo;
+  if (!d) return '';
+  return `<div class="sddeath">☠ ${d.map((x) => `<b>${esc(x.name)}</b> 처형 — ${x.reason === 'bust' ? '파산' : `라운드 ${g.result.round} 최하위 ($${fmt(x.chips)})`}`).join(' · ')}${g.champion ? '' : `<br><small>라운드 ${g.round} 시작 · 모두 칩 리셋</small>`}</div>`;
+}
+
 function renderShowdownPanel(g, meId) {
   const el = $('#sdPanel');
   if (g.street !== 'showdown' || !g.result || g.result.uncontested) { el.hidden = true; el.dataset.hand = ''; return; }
@@ -348,14 +355,27 @@ function renderShowdownPanel(g, meId) {
       <span class="sdtag" style="animation-delay:${(d + 0.8).toFixed(2)}s">${winIds.has(id) ? 'WIN' : ''}</span>
     </div>`;
   }).join('');
-  el.innerHTML = `${rows}<div class="sdwhy" style="animation-delay:${(order.length * REVEAL_PER).toFixed(2)}s">${explain(g)}</div>`;
+  el.innerHTML = `${rows}<div class="sdwhy" style="animation-delay:${(order.length * REVEAL_PER).toFixed(2)}s">${explain(g)}${deathNote(g)}</div>`;
   el.hidden = false;
   if (typeof Scene3D !== 'undefined') Scene3D.tour(order, REVEAL_PER);
 }
 
 // Who went broke this hand, and how they go out. Seeded so every viewer sees the same execution.
 const EXECUTIONS = ['shotgun', 'drop', 'lightsout', 'electric'];
-const bustedIn = (g) => (g.street === 'showdown' ? g.players.filter((p) => p.inHand && p.chips === 0) : []);
+const bustedIn = (g) => (g.street !== 'showdown' ? []
+  : g.result?.deaths ? g.players.filter((p) => g.result.deaths.includes(p.id))
+  : g.mode === 'death' ? []
+  : g.players.filter((p) => p.inHand && p.chips === 0));
+// death mode: who is on the chopping block right now
+function lowestAlive(g) {
+  const alive = g.players.filter((p) => !p.dead);
+  if (alive.length < 2) return null;
+  const val = (p) => p.chips + p.bet;
+  const low = Math.min(...alive.map(val));
+  const tied = alive.filter((p) => val(p) === low);
+  return tied.length === alive.length ? null : tied;
+}
+const handInRound = (g) => Math.min(g.roundLen, g.roundHand + (Poker.isLive(g) ? 1 : 0));
 function executionFor(g, id) {
   let h = g.handNo * 7919;
   for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
@@ -380,6 +400,7 @@ function renderTable(ctx) {
     me: ctx.me,
     onKick: ctx.onKick,
     labelHTML: (p) => {
+      const danger = new Set((g.mode === 'death' && lowestAlive(g) || []).map((q) => q.id));
       const i = g.players.indexOf(p);
       const cls = ['plate'];
       if (i === g.toAct) cls.push('turn');
@@ -394,7 +415,8 @@ function renderTable(ctx) {
         <div class="name">${esc(p.name)}${p.bot ? `<span class="persona">${Poker.personaOf(p).name}</span>` : ''}</div>
         <div class="chips">$${fmt(p.chips)}${p.bet ? ` <span class="betamt">▸${fmt(p.bet)}</span>` : ''}</div>
         ${shown[p.id] ? `<div class="handname">${shown[p.id].name}</div>` : ''}
-        ${p.chips === 0 && !p.inHand ? '<div class="handname">파산</div>' : ''}
+        ${p.dead ? `<div class="handname dead">${p.spectator ? '관전' : '☠ 사망'}</div>` : p.chips === 0 && !p.inHand ? '<div class="handname">파산</div>' : ''}
+        ${g.mode === 'death' && Poker.isLive(g) && danger.has(p.id) ? '<div class="danger">☠ 최하위</div>' : ''}
         ${ctx.isHost ? `<button class="btn tiny red kick" data-kick="${p.id}">✕</button>` : ''}
       </div>`;
     },
@@ -403,7 +425,12 @@ function renderTable(ctx) {
   const livePot = g.pot + g.players.reduce((s, p) => s + p.bet, 0);
   $('#pot').textContent = `POT $${fmt(livePot)}`;
   $('#pot').hidden = livePot === 0 && g.street !== 'showdown';
-  $('#street').textContent = `${STREET_KO[g.street]} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
+  if (g.mode === 'death') {
+    const hr = handInRound(g), last = Poker.isLive(g) && hr === g.roundLen;
+    const alive = g.players.filter((p) => !p.dead).length;
+    const handTxt = !Poker.isLive(g) && g.result?.deaths ? '라운드 종료' : `핸드 ${hr || 0}/${g.roundLen}${last ? ' 마지막!' : ''}`;
+    $('#street').innerHTML = `<span class="dm">☠ R${g.round}</span> · <span class="${last ? 'dm-last' : ''}">${handTxt}</span> · 생존 ${alive} · ${STREET_KO[g.street]}`;
+  } else $('#street').textContent = `${STREET_KO[g.street]} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
 
   const banner = $('#banner');
   renderShowdownPanel(g, ctx.me);
@@ -411,7 +438,7 @@ function renderTable(ctx) {
     banner.hidden = false;
     const meIn = g.players.find((p) => p.id === ctx.me);
     banner.className = winIds.has(ctx.me) ? 'win' : meIn && meIn.inHand && !meIn.folded ? 'lose' : '';
-    banner.innerHTML = g.result.winners.map((w) => `${esc(w.name)} +$${fmt(w.amount)}${w.hand ? ` <small>(${w.hand})</small>` : ''}`).join('<br>');
+    banner.innerHTML = deathNote(g) + g.result.winners.map((w) => `${esc(w.name)} +$${fmt(w.amount)}${w.hand ? ` <small>(${w.hand})</small>` : ''}`).join('<br>');
   } else banner.hidden = true;
 
   const myP = g.players.find((p) => p.id === ctx.me);
@@ -420,7 +447,8 @@ function renderTable(ctx) {
   const flipAge = ((performance.now() - renderTable.flipAt) / 1000).toFixed(2);
   const myCards = myP && myP.hole.length && myP.hole[0] !== '??'
     ? `<span class="myhand">${myP.hole.map((c, i) => `<span class="flip" style="animation-delay:${(0.5 + i * 0.35 - flipAge).toFixed(2)}s">${cardHTML(c, '')}</span>`).join('')}</span>` : '';
-  ctx.myLine = myP ? `${myCards}<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
+  const meDanger = myP && g.mode === 'death' && Poker.isLive(g) && !myP.dead && (lowestAlive(g) || []).some((p) => p.id === myP.id);
+  ctx.myLine = myP ? `${myCards}${meDanger ? `<span class="danger-me">☠ 최하위${handInRound(g) >= g.roundLen ? ' · 이번 판이 끝나면 처형' : ''}</span>` : ''}<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
   $('#log').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
   $('#log').scrollTop = 1e6;
 
@@ -505,7 +533,7 @@ const Practice = {
     const name = $('#pName').value.trim() || '나';
     store.set(NAME_KEY, name);
     const bb = Math.max(2, parseInt($('#pBB').value, 10) || 20);
-    const g = Poker.createGame({ sb: Math.floor(bb / 2), bb, startChips: Math.max(bb * 10, parseInt($('#pChips').value, 10) || 1000) });
+    const g = Poker.createGame({ mode: $('#pMode').value, sb: Math.floor(bb / 2), bb, startChips: Math.max(bb * 10, parseInt($('#pChips').value, 10) || 1000) });
     Poker.addPlayer(g, { id: 'me', name });
     const names = ['조커', '지미', '루시', '마크', '에디', '샤샤', '토니'];
     const nb = parseInt($('#pBots').value, 10);
@@ -538,7 +566,7 @@ const Practice = {
       onAction: (a) => { const r = Poker.applyAction(g, 'me', a); if (!r.ok) toast(r.error); this.tick(); },
       showdownMsg: '다음 핸드 준비 중…',
       extraButtons: () => {
-        if (g.street !== 'showdown' || me.chips === 0) return [];
+        if (g.street !== 'showdown' || (me.chips === 0 && !me.dead) || g.champion || (me.dead && !g.meDeathShown)) return [];
         const b = document.createElement('button');
         b.className = 'btn orange'; b.textContent = '다음 핸드 ▶';
         b.onclick = () => this.next();
@@ -556,7 +584,19 @@ const Practice = {
       // let the reveal and the shot play before any popup covers the table
       const execMs = bustedIn(g).length ? EXEC_MS + 1800 : 0;
       const revealMs = (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500) + execMs;
-      if (me.chips === 0) {
+      if (g.mode === 'death') {
+        const wait = (key, fn) => { if (!this[key]) { this[key] = true; this.timer = setTimeout(() => this.tick(), revealMs); return true; } this[key] = false; fn(); return true; };
+        if (g.champion) return wait('winShown', () => {
+          store.del(PRACTICE_KEY);
+          const champ = g.players.find((p) => p.id === g.champion);
+          modal(g.champion === 'me' ? '<h2>🏆 최후의 1인</h2><p>모두를 묻고 살아남았습니다.</p>' : `<h2>☠ 게임 종료</h2><p><b>${esc(champ.name)}</b>이(가) 최후의 1인입니다.</p>`,
+            [['메뉴로', 'gray', () => show('menu')], ['다시 하기', 'orange', () => this.start()]]);
+        });
+        if (me.dead && !g.meDeathShown) return wait('bustShown', () => modal(`<h2>☠ 처형당했습니다</h2><p>라운드 ${me.deathRound}에서 탈락했습니다.</p>`, [
+          ['메뉴로', 'gray', () => { store.del(PRACTICE_KEY); show('menu'); }],
+          ['끝까지 관전', 'orange', () => { g.meDeathShown = true; this.next(); }],
+        ]));
+      } else if (me.chips === 0) {
         if (!this.bustShown) { this.bustShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
         this.bustShown = false;
         return modal('<h2>파산!</h2><p>칩을 모두 잃었습니다.</p>', [
@@ -564,7 +604,7 @@ const Practice = {
           ['리바이', 'orange', () => { me.chips = g.startChips; this.next(); }],
         ]);
       }
-      if (alive.length === 1) {
+      if (g.mode !== 'death' && alive.length === 1) {
         if (!this.winShown) { this.winShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
         this.winShown = false;
         store.del(PRACTICE_KEY);
@@ -583,6 +623,8 @@ const Practice = {
   exit() { clearTimeout(this.timer); this.save(); show('menu'); },
 };
 $('#btnPracticeStart').onclick = () => Practice.start();
+const DM_HINT = '8핸드마다 칩이 가장 적은 사람이 처형됩니다. 파산하면 그 자리에서 처형되고 다음 라운드로. 라운드마다 칩은 리셋, 최후의 1인까지.';
+for (const id of ['pMode', 'oMode']) $('#' + id).addEventListener('change', (e) => { $('#pModeHint').textContent = $('#pMode').value === 'death' ? DM_HINT : ''; if (e.target.value === 'death') toast('☠ ' + DM_HINT); });
 
 // ---------- execution preview: an empty table and a victim, nothing at stake ----------
 const EXEC_NAMES = { shotgun: '샷건', drop: '바닥 꺼짐', lightsout: '소등', electric: '전기의자' };
@@ -637,7 +679,7 @@ async function loadRooms() {
   try {
     const list = await api('/api/rooms');
     $('#roomList').innerHTML = list.length
-      ? list.map((r) => `<li data-room="${r.id}"><span><span class="code">${r.id}</span> ${esc(r.name)}</span><span>${r.players}/8 · ${r.blinds}${r.running ? ' · 진행중' : ''}</span></li>`).join('')
+      ? list.map((r) => `<li data-room="${r.id}"><span><span class="code">${r.id}</span> ${esc(r.name)}</span><span>${r.mode === 'death' ? '☠ ' : ''}${r.players}/8 · ${r.blinds}${r.running ? ' · 진행중' : ''}</span></li>`).join('')
       : '<li style="cursor:default;opacity:.6">열린 방이 없습니다</li>';
     $('#roomList').querySelectorAll('[data-room]').forEach((li) => (li.onclick = () => { $('#oCode').value = li.dataset.room; join(); }));
   } catch { $('#roomList').innerHTML = '<li style="cursor:default;opacity:.6">서버에 연결할 수 없습니다 (node server.js 실행 필요)</li>'; }
@@ -647,7 +689,7 @@ const oName = () => { const n = $('#oName').value.trim(); if (n) store.set(NAME_
 $('#btnCreate').onclick = async () => {
   if (!oName()) return toast('닉네임을 입력하세요');
   try {
-    const s = await api('/api/create', { name: oName(), roomName: $('#oRoomName').value, chips: $('#oChips').value, bb: $('#oBB').value });
+    const s = await api('/api/create', { name: oName(), mode: $('#oMode').value, roomName: $('#oRoomName').value, chips: $('#oChips').value, bb: $('#oBB').value });
     Online.connect(s);
   } catch (e) { toast(e.message); }
 };
@@ -684,22 +726,28 @@ const Online = {
       return modal('<h2>방에서 나갔습니다</h2>', [['로비로', 'gray', () => show('lobby')]]);
     }
     const isHost = v.room.hostId === v.me;
+    if (v.game.champion && this.champShown !== v.game.handNo) {
+      this.champShown = v.game.handNo;
+      const champ = v.game.players.find((p) => p.id === v.game.champion);
+      const wait = v.game.result && !v.game.result.uncontested ? Object.keys(v.game.result.hands).length * REVEAL_PER * 1000 + EXEC_MS + 2600 : EXEC_MS + 1500;
+      setTimeout(() => modal(v.game.champion === v.me ? '<h2>🏆 최후의 1인</h2><p>모두를 묻고 살아남았습니다.</p>' : `<h2>☠ 게임 종료</h2><p><b>${esc(champ?.name || '')}</b>이(가) 최후의 1인입니다.</p>`, [['확인', 'orange']]), wait);
+    }
     const me = v.game.players.find((p) => p.id === v.me);
     $('#roomInfo').innerHTML = `<b>${esc(v.room.name)}</b> · 코드 <b>${v.room.id}</b> · ${v.room.running ? '진행중' : '일시정지'}`;
     const host = $('#hostCtl');
     host.innerHTML = '';
     const mk = (label, cls, fn) => { const b = document.createElement('button'); b.className = `btn tiny ${cls}`; b.textContent = label; b.onclick = fn; return b; };
     if (isHost) {
-      host.append(v.room.running ? mk('일시정지', 'gray', () => this.call('/api/pause')) : mk('게임 시작', 'orange', () => this.call('/api/start')));
+      host.append(v.room.running ? mk('일시정지', 'gray', () => this.call('/api/pause')) : mk(v.game.champion ? '새 게임' : '게임 시작', 'orange', () => this.call('/api/start')));
       host.append(mk('+봇', 'blue', () => this.call('/api/addbot')));
     }
     renderTable({
       game: v.game, me: v.me, legal: v.legal, isHost,
       onAction: (a) => this.call('/api/action', { action: a }),
       onKick: (id) => modal('<h2>내보낼까요?</h2>', [['취소', 'gray'], ['내보내기', 'red', () => this.call('/api/kick', { target: id })]]),
-      waitingMsg: isHost ? `친구에게 방 코드 <b>${v.room.id}</b>를 알려주고 [게임 시작]을 누르세요` : '방장이 게임을 시작하길 기다리는 중…',
+      waitingMsg: v.game.champion ? `🏆 <b>${esc(v.game.players.find((p) => p.id === v.game.champion)?.name || '')}</b> 최후의 1인${isHost ? ' · [새 게임]으로 다시' : ''}` : isHost ? `친구에게 방 코드 <b>${v.room.id}</b>를 알려주고 [게임 시작]을 누르세요` : '방장이 게임을 시작하길 기다리는 중…',
       showdownMsg: v.room.running ? '5초 후 다음 핸드…' : '일시정지됨 (방장이 재개하면 계속)',
-      extraButtons: () => (me.chips === 0 && !(Poker.isLive(v.game) && me.inHand)
+      extraButtons: () => (v.game.mode !== 'death' && me.chips === 0 && !(Poker.isLive(v.game) && me.inHand)
         ? [mk('리바이', 'orange', () => this.call('/api/rebuy'))] : []),
     });
   },

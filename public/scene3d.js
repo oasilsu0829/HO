@@ -458,7 +458,7 @@ const Scene3D = (() => {
     const live = new Set();
     for (const p of g.players) {
       const s = seatPos[p.id];
-      if (s.me) continue;
+      if (s.me || p.spectator) continue; // spectators who joined a running deathmatch have no body at the table
       live.add(p.id);
       let f = figures.get(p.id);
       if (!f) { f = makeFigure(p.id); scene.add(f); scene.add(f.userData.chair); figures.set(p.id, f); f.position.copy(s.figure); }

@@ -82,6 +82,10 @@
   // ---------- game state ----------
   function createGame(opts = {}) {
     return {
+      mode: opts.mode === 'death' ? 'death' : 'normal',
+      roundLen: 8,      // death mode: hands per round
+      round: 1,
+      roundHand: 0,
       sb: opts.sb || 10,
       bb: opts.bb || 20,
       startChips: opts.startChips || 1000,
@@ -187,7 +191,12 @@
         if (g.dealer >= i) g.dealer--;
       }
     }
-    const seated = g.players.filter((p) => p.chips > 0 && !p.sitOut);
+    // death mode: a new round puts every survivor back on the same stack
+    if (g.mode === 'death' && g.resetPending) {
+      for (const p of g.players) if (!p.dead) p.chips = g.startChips;
+      g.resetPending = false;
+    }
+    const seated = g.players.filter((p) => p.chips > 0 && !p.sitOut && !p.dead);
     if (seated.length < 2) return false;
 
     g.handNo++;
@@ -197,7 +206,7 @@
     g.result = null;
     for (const p of g.players) {
       p.hole = []; p.bet = 0; p.total = 0; p.acted = false; p.allIn = false; p.lastAction = ''; p.say = null; p.tell = '';
-      p.inHand = p.chips > 0 && !p.sitOut;
+      p.inHand = p.chips > 0 && !p.sitOut && !p.dead;
       p.folded = !p.inHand;
     }
     g.aggressor = null; g.lastAggressor = null;
@@ -334,6 +343,34 @@
     g.pot = 0;
     g.street = 'showdown';
     g.toAct = -1;
+    deathCheck(g);
+  }
+
+  // Death mode: whoever busts dies at once and ends the round; otherwise the
+  // shortest stack dies after the round's last hand. Last one alive wins.
+  function deathCheck(g) {
+    if (g.mode !== 'death') return;
+    g.roundHand++;
+    const alive = g.players.filter((p) => !p.dead && !p.leaving);
+    let doomed = alive.filter((p) => p.inHand && p.chips === 0);
+    let reason = 'bust';
+    if (!doomed.length && g.roundHand >= g.roundLen) {
+      const low = Math.min(...alive.map((p) => p.chips));
+      const tied = alive.filter((p) => p.chips === low);
+      // a tie goes against whoever put the least into this hand (the most passive)
+      tied.sort((a, b) => a.total - b.total || (Math.random() - 0.5));
+      doomed = [tied[0]];
+      reason = 'lowest';
+    }
+    if (!doomed.length) return;
+    g.result.deaths = doomed.map((p) => p.id);
+    g.result.deathInfo = doomed.map((p) => ({ id: p.id, name: p.name, chips: p.chips, reason }));
+    g.result.round = g.round;
+    for (const p of doomed) { log(g, `☠ ${p.name} 처형 (${reason === 'bust' ? '파산' : `최하위 $${p.chips}`})`); p.dead = true; p.deathRound = g.round; p.chips = 0; }
+    const left = alive.filter((p) => !p.dead);
+    if (left.length <= 1) { g.champion = left[0]?.id || null; if (left[0]) log(g, `🏆 ${left[0].name} 최후의 1인`); return; }
+    g.round++; g.roundHand = 0; g.resetPending = true;
+    log(g, `── 라운드 ${g.round} 시작: 칩 리셋 ──`);
   }
 
   function showdown(g) {
@@ -389,6 +426,7 @@
     g.pot = 0;
     g.street = 'showdown';
     g.toAct = -1;
+    deathCheck(g);
   }
 
   function seatDist(g, id) {
@@ -478,8 +516,19 @@
     const risk = L.toCall / Math.max(1, p.chips);
     const committed = p.total / Math.max(1, p.total + p.chips);
     const potOdds = L.toCall > 0 ? L.toCall / (L.pot + L.toCall) : 0;
-    const fear = Math.pow(Math.min(1, risk), 1.3) * (0.22 - 0.14 * P.aggr) * (1 - committed);
-    const need = potOdds + P.tight * 0.05 + fear;
+    let fear = Math.pow(Math.min(1, risk), 1.3) * (0.22 - 0.14 * P.aggr) * (1 - committed);
+    let need = potOdds + P.tight * 0.05 + fear;
+    // death mode: busting is death, but so is sitting on the shortest stack when the round ends
+    let desperate = false;
+    if (g.mode === 'death') {
+      const alive = g.players.filter((q) => !q.dead);
+      const low = Math.min(...alive.map((q) => q.chips + q.bet));
+      const lowest = p.chips + p.bet <= low;
+      const left = g.roundLen - g.roundHand;
+      desperate = lowest && left <= 2;
+      if (desperate) need -= 0.1 + (left === 1 ? 0.08 : 0);
+      else need += fear * 0.5; // comfortable players protect their lives
+    }
 
     const size = (frac) => clamp(g.currentBet + Math.max(g.bb, Math.round((L.pot * frac) / g.bb) * g.bb), L.minTo, L.maxTo);
     const leaky = Math.random() > P.skill; // weak players give away their hand
@@ -490,7 +539,7 @@
     const quick = () => 500 + Math.random() * 600;
     let d;
 
-    if (p.chips / g.bb < 10 && L.canRaise) {
+    if ((p.chips / g.bb < 10 || (desperate && Math.random() < 0.4)) && L.canRaise) {
       // short stack: shove or get out
       if (effEq > fair + 0.12 - P.aggr * 0.08) d = { type: 'allin', say: talk('allin', 0.7), think: tank() + 800 };
       else d = L.canCheck ? { type: 'check', think: quick() } : effEq >= need ? { type: 'call', think: tank() } : { type: 'fold', say: talk('fold', 0.3), think: tank() };

@@ -438,3 +438,14 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 }
 #gore.go { animation: goreRun 7s ease-in forwards; }
 @keyframes goreRun { 0% { opacity: 1; transform: none; } 70% { opacity: .9; transform: translateY(2%); } 100% { opacity: 0; transform: translateY(4%); } }
+
+/* deathmatch */
+.dm { color: var(--rust-hi); }
+.dm-last { color: var(--rust-hi); animation: blink .6s steps(2) infinite; }
+.danger { position: absolute; left: 50%; top: calc(100% + 2px); transform: translateX(-50%); white-space: nowrap; font-size: 11px; color: #fff; background: var(--rust); padding: 1px 5px; box-shadow: 0 0 0 1px var(--ink); animation: blink 1s steps(2) infinite; }
+.handname.dead { color: var(--rust-hi); }
+.sddeath { margin-top: 6px; color: var(--rust-hi); }
+.sddeath b { color: #fff; }
+.modehint { margin: -4px 0 0; font-size: 12px; color: var(--dim); max-width: 300px; line-height: 1.5; }
+#banner .sddeath { margin: 0 0 6px; }
+.danger-me { color: #fff; background: var(--rust); padding: 2px 6px; margin-right: 8px; box-shadow: 0 0 0 1px var(--ink), 0 0 18px rgba(210,48,31,.5); animation: blink 1s steps(2) infinite; }
