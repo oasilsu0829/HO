@@ -146,19 +146,18 @@ const FX = {
         const iWon = winners.some((w) => w.id === me.id);
         const big = winners.reduce((s, w) => s + w.amount, 0) >= g.bb * 20;
         const iWasIn = me.inHand && !me.folded;
-        // someone who shoved and lost takes the shot
-        const shotLoser = g.players.some((p) => p.allIn && p.inHand && !p.folded && !winners.some((w) => w.id === p.id));
         const delay = g.result?.uncontested ? 0 : 900;
         setTimeout(() => {
           if (iWasIn && !iWon && me.allIn) {
+            // the only time the gun goes off: you shoved and lost
             this.sfx('blast'); this.shake(true); this.flash('rgba(210,48,31,.85)'); this.stamp('탕!');
+          } else if (iWon && me.allIn) {
+            this.sfx('click');
+            setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); this.stamp(big ? 'JACKPOT' : '생존', 'var(--amber)'); }, 500);
           } else if (iWon) {
-            if (me.allIn) this.sfx('click');
-            setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); if (big) this.stamp('JACKPOT', 'var(--amber)'); }, me.allIn ? 450 : 0);
-            if (shotLoser) setTimeout(() => { this.sfx('blast'); this.shake(false); }, me.allIn ? 0 : 200);
-          } else {
-            if (shotLoser) { this.sfx('blast'); this.shake(true); }
-            if (iWasIn) { this.sfx('lose'); this.flash('rgba(143,29,20,.5)'); }
+            this.sfx('win'); this.flash('rgba(216,160,58,.4)'); if (big) this.stamp('JACKPOT', 'var(--amber)');
+          } else if (iWasIn) {
+            this.sfx('lose'); this.flash('rgba(143,29,20,.4)');
           }
         }, delay);
         break;
