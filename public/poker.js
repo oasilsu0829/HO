@@ -6,11 +6,24 @@
 
   const rv = (c) => RANKS.indexOf(c[0]) + 2;
 
+  // Unbiased random integer in [0, n) from the platform's cryptographic RNG
+  // (browser, Node and Cloudflare all provide crypto.getRandomValues).
+  const rngBuf = new Uint32Array(1);
+  function randInt(n) {
+    const c = globalThis.crypto;
+    if (!c || !c.getRandomValues) return Math.floor(Math.random() * n);
+    const limit = Math.floor(4294967296 / n) * n; // reject the tail so every value is equally likely
+    let x;
+    do { c.getRandomValues(rngBuf); x = rngBuf[0]; } while (x >= limit);
+    return x % n;
+  }
+
+  // Fisher–Yates with the crypto RNG
   function newDeck() {
     const d = [];
     for (const r of RANKS) for (const s of SUITS) d.push(r + s);
     for (let i = d.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = randInt(i + 1);
       [d[i], d[j]] = [d[j], d[i]];
     }
     return d;
@@ -234,6 +247,8 @@
     put(g, g.players[bbI], g.bb); g.players[bbI].lastAction = 'BB';
     for (let r = 0; r < 2; r++) for (const p of g.players) if (p.inHand) p.hole.push(g.deck.pop());
     g.currentBet = g.bb;
+    g.fullRaiseSeq = 1; // bumps on every full raise; an all-in short of a full raise doesn't
+    for (const p of g.players) p.actedSeq = 0;
     g.minRaise = g.bb;
     g.street = 'preflop';
     log(g, `── 핸드 #${g.handNo} ──`);
@@ -253,7 +268,8 @@
       toCall,
       callAmt: Math.min(toCall, p.chips),
       canCheck: toCall <= 0,
-      canRaise: maxTo > g.currentBet,
+      // you may raise if you haven't acted yet, or a full raise has happened since you did
+      canRaise: maxTo > g.currentBet && (!(p.actedSeq > 0) || p.actedSeq < g.fullRaiseSeq),
       minTo: Math.min(g.currentBet + g.minRaise, maxTo),
       maxTo,
       pot: g.pot + g.players.reduce((s, q) => s + q.bet, 0),
@@ -290,7 +306,7 @@
       to = Math.max(L.minTo, Math.min(to, L.maxTo));
       put(g, p, to - p.bet);
       const raiseBy = to - g.currentBet;
-      if (raiseBy >= g.minRaise) g.minRaise = raiseBy;
+      if (raiseBy >= g.minRaise) { g.minRaise = raiseBy; g.fullRaiseSeq = (g.fullRaiseSeq || 1) + 1; }
       const wasBet = g.currentBet === 0;
       g.currentBet = to;
       for (const q of g.players) if (q !== p && canAct(q)) q.acted = false;
@@ -301,6 +317,7 @@
       return { ok: false, error: '알 수 없는 액션' };
     }
     p.acted = true;
+    p.actedSeq = g.fullRaiseSeq || 1;
     p.say = action.say ? { text: String(action.say).slice(0, 40), seq: g.logSeq } : null;
     p.tell = action.tell || '';
     advance(g);
@@ -327,7 +344,8 @@
 
   function endRound(g) {
     for (;;) {
-      for (const p of g.players) { g.pot += p.bet; p.bet = 0; p.acted = false; }
+      for (const p of g.players) { g.pot += p.bet; p.bet = 0; p.acted = false; p.actedSeq = 0; }
+      g.fullRaiseSeq = 1;
       g.currentBet = 0;
       g.minRaise = g.bb;
       g.aggressor = null;
@@ -368,7 +386,7 @@
       const low = Math.min(...alive.map((p) => p.chips));
       const tied = alive.filter((p) => p.chips === low);
       // a tie goes against whoever put the least into this hand (the most passive)
-      tied.sort((a, b) => a.total - b.total || (Math.random() - 0.5));
+      tied.sort((a, b) => a.total - b.total || seatDist(g, a.id) - seatDist(g, b.id)); // then seat order from the button, never chance
       doomed = [tied[0]];
       reason = 'lowest';
     }
@@ -622,7 +640,7 @@
   const DUEL_STEP = 750;
   const duelMs = (g) => { const d = duelInfo(g); return d ? 1300 + (d.depth) * DUEL_STEP + 1300 : 0; };
 
-  const api = { duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  const api = { randInt, newDeck, sortFive, cmp, duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);
