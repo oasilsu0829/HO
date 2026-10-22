@@ -573,7 +573,7 @@
   }
 
   // How long the client's result celebration runs for each tier (high card .. royal flush)
-  const CELEB_MS = [900, 1700, 2100, 2400, 2800, 3200, 3600, 4200, 5200, 7600];
+  const CELEB_MS = [1000, 2300, 2700, 3100, 3500, 3900, 4400, 5200, 6000, 8600];
   function celebTier(score) { return score[0] === 8 && score[1] === 14 ? 9 : score[0]; }
   function bestWin(g) {
     if (!g.result || g.result.uncontested) return null;

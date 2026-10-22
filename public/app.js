@@ -276,40 +276,115 @@ syncSound();
 syncGore();
 
 // ---------- result celebrations: tidy for a pair, unhinged for a royal ----------
-const NOTE = (i) => 523.25 * Math.pow(2, [0, 2, 4, 7, 9][((i % 5) + 5) % 5] / 12 + Math.floor(i / 5)); // C-major pentatonic, i=0 is C5
-const Celebrate = {
-  parts: [], raf: 0, cv: null, x: null, timers: [],
-  xylo(i, at = 0, vol = 0.35) { // a bright wooden "tok": fundamental + inharmonic partial, very fast decay
-    this.timers.push(setTimeout(() => {
-      const ac = FX.audio(); if (!ac) return;
-      const f = NOTE(i), t = ac.currentTime;
-      for (const [mult, v, dec] of [[1, vol, 0.45], [3.98, vol * 0.35, 0.12], [9.1, vol * 0.12, 0.05]]) {
-        const o = ac.createOscillator(), g = ac.createGain();
-        o.type = mult === 1 ? 'triangle' : 'sine'; o.frequency.value = f * mult;
-        g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dec);
-        o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dec + 0.02);
-      }
-    }, at));
+// A tiny synth rack: everything goes through a compressor and a reverb so hits feel big.
+const Sfx = {
+  ac: null, bus: null, rev: null,
+  init() {
+    const ac = FX.audio(); if (!ac) return null;
+    if (this.ac === ac && this.bus) return ac;
+    this.ac = ac;
+    const comp = ac.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 8; comp.attack.value = 0.003; comp.release.value = 0.2;
+    comp.connect(ac.destination);
+    this.bus = ac.createGain(); this.bus.gain.value = 0.9; this.bus.connect(comp);
+    this.rev = ac.createConvolver();
+    const len = ac.sampleRate * 2.4, buf = ac.createBuffer(2, len, ac.sampleRate);
+    for (let c = 0; c < 2; c++) { const d = buf.getChannelData(c); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+    this.rev.buffer = buf;
+    const rg = ac.createGain(); rg.gain.value = 0.32; this.rev.connect(rg).connect(this.bus);
+    return ac;
   },
-  run(seq, step, base = 0, vol) { seq.forEach((n, k) => n != null && this.xylo(n, base + k * step, vol)); },
+  out(node, wet = 0.25) { node.connect(this.bus); if (wet) { const g = this.ac.createGain(); g.gain.value = wet; node.connect(g).connect(this.rev); } },
+  hz: (m) => 440 * Math.pow(2, (m - 69) / 12),
+  env(g, t, a, peak, dec) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(peak, t + a); g.gain.exponentialRampToValueAtTime(0.0001, t + a + dec); },
+  osc(type, f, t, dur, vol, { to, wet = 0.2, a = 0.004, filt } = {}) {
+    const ac = this.ac, o = ac.createOscillator(), g = ac.createGain();
+    o.type = type; o.frequency.setValueAtTime(f, t); if (to) o.frequency.exponentialRampToValueAtTime(to, t + dur);
+    this.env(g, t, a, vol, dur);
+    let n = o.connect(g);
+    if (filt) { const lp = ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(filt[0], t); lp.frequency.exponentialRampToValueAtTime(filt[1], t + dur); n = g.connect(lp); }
+    this.out(n, wet); o.start(t); o.stop(t + a + dur + 0.05);
+  },
+  noise(t, dur, vol, type, f0, f1, wet = 0.2) {
+    const ac = this.ac, buf = ac.createBuffer(1, Math.max(1, ac.sampleRate * dur), ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const bq = ac.createBiquadFilter(); bq.type = type; bq.frequency.setValueAtTime(f0, t); if (f1) bq.frequency.exponentialRampToValueAtTime(f1, t + dur);
+    const g = ac.createGain(); this.env(g, t, 0.004, vol, dur);
+    src.connect(bq).connect(g); this.out(g, wet); src.start(t); src.stop(t + dur + 0.05);
+  },
+  // instruments (t = seconds from now)
+  play(fn) { const ac = this.init(); if (ac) fn(ac.currentTime); },
+  boom(dt = 0, v = 1) { this.play((t) => { t += dt; this.osc('sine', 160, t, 0.7, v, { to: 30, wet: 0.05 }); this.noise(t, 0.04, v * 0.5, 'lowpass', 2000); }); },
+  kick(dt = 0, v = 0.8) { this.play((t) => { t += dt; this.osc('sine', 120, t, 0.25, v, { to: 40, wet: 0 }); }); },
+  snare(dt = 0, v = 0.5) { this.play((t) => { t += dt; this.noise(t, 0.18, v, 'bandpass', 1800); this.osc('triangle', 190, t, 0.1, v * 0.6); }); },
+  crash(dt = 0, v = 0.5) { this.play((t) => { t += dt; this.noise(t, 1.6, v, 'highpass', 5000, 3000, 0.4); }); },
+  bell(m, dt = 0, v = 0.35) { this.play((t) => { t += dt; const f = this.hz(m); this.osc('sine', f, t, 1.4, v, { wet: 0.5 }); this.osc('sine', f * 2.76, t, 0.5, v * 0.35, { wet: 0.5 }); this.osc('triangle', f / 2, t, 0.9, v * 0.5, { wet: 0.3 }); }); },
+  stab(ms, dt = 0, dur = 0.5, v = 0.16) { this.play((t) => { t += dt; for (const m of ms) for (const d of [-9, 0, 9]) { const ac = this.ac, o = ac.createOscillator(), g = ac.createGain(), lp = ac.createBiquadFilter(); o.type = 'sawtooth'; o.frequency.value = this.hz(m); o.detune.value = d; lp.type = 'lowpass'; lp.frequency.setValueAtTime(6000, t); lp.frequency.exponentialRampToValueAtTime(500, t + dur); this.env(g, t, 0.01, v, dur); o.connect(lp).connect(g); this.out(g, 0.35); o.start(t); o.stop(t + dur + 0.1); } this.osc('sine', this.hz(ms[0] - 24), t, dur, v * 2.2, { wet: 0 }); }); },
+  coin(dt = 0, v = 0.22) { this.play((t) => { t += dt; this.osc('square', 1318, t, 0.06, v, { wet: 0.2 }); this.osc('square', 1760, t + 0.06, 0.35, v, { wet: 0.3 }); }); },
+  riser(dt, dur, v = 0.35) { this.play((t) => { t += dt; this.noise(t, dur, v, 'bandpass', 300, 9000, 0.3); this.osc('sawtooth', 80, t, dur, v * 0.5, { to: 900, a: dur * 0.9, filt: [400, 6000] }); }); },
+  whoosh(dt = 0, v = 0.4) { this.play((t) => { t += dt; this.noise(t, 0.35, v, 'bandpass', 600, 4000, 0.2); }); },
+  siren(dt, dur, v = 0.18) { this.play((t) => { t += dt; const ac = this.ac, o = ac.createOscillator(), g = ac.createGain(); o.type = 'sawtooth'; for (let k = 0; k < dur / 0.25; k++) o.frequency.setValueAtTime(k % 2 ? 660 : 880, t + k * 0.25); this.env(g, t, 0.02, v, dur); o.connect(g); this.out(g, 0.3); o.start(t); o.stop(t + dur + 0.1); }); },
+  wobble(dt, dur, root = 33, v = 0.4) { this.play((t) => { t += dt; const ac = this.ac, o = ac.createOscillator(), lp = ac.createBiquadFilter(), g = ac.createGain(), lfo = ac.createOscillator(), lg = ac.createGain(); o.type = 'sawtooth'; o.frequency.value = this.hz(root); lp.type = 'lowpass'; lp.Q.value = 12; lp.frequency.value = 400; lfo.frequency.value = 6; lg.gain.value = 900; lfo.connect(lg).connect(lp.frequency); this.env(g, t, 0.02, v, dur); o.connect(lp).connect(g); this.out(g, 0.1); o.start(t); lfo.start(t); o.stop(t + dur + 0.1); lfo.stop(t + dur + 0.1); }); },
+  bwomp(dt = 0) { this.play((t) => { t += dt; this.osc('sawtooth', 147, t, 0.5, 0.18, { to: 98, filt: [1200, 300] }); }); },
+  tick(i, dt = 0) { this.play((t) => { t += dt; this.osc('square', this.hz(72 + Math.min(24, i)), t, 0.05, 0.08, { wet: 0.1 }); }); },
+};
+
+const C = { // chord voicings (midi)
+  I: [60, 64, 67, 72], IV: [65, 69, 72, 77], V: [67, 71, 74, 79], vi: [57, 60, 64, 69], i: [60, 63, 67, 72], bVI: [56, 60, 63, 68], bVII: [58, 62, 65, 70],
+};
+
+const Celebrate = {
+  parts: [], raf: 0, cv: null, x: null, timers: [], anims: [],
   later(fn, at) { this.timers.push(setTimeout(fn, at)); },
+  A(node, frames, opt) { if (!node) return; const a = node.animate(frames, { fill: 'both', ...opt }); this.anims.push(a); return a; },
+  punch(s = 1.06, dur = 220) { const st = $('#stage'); if (st) st.animate([{ transform: 'scale(1)' }, { transform: `scale(${s})` }, { transform: 'scale(1)' }], { duration: dur, easing: 'cubic-bezier(.2,1.6,.4,1)' }); this.A($('#celeb .ccards'), [{ transform: 'scale(1)' }, { transform: `scale(${1 + (s - 1) * 2})` }, { transform: 'scale(1)' }], { duration: dur, fill: 'none' }); },
+  ring(col = '#ffe08a', size = 1) { const r = document.createElement('div'); r.className = 'cring'; r.style.borderColor = col; $('#celeb').appendChild(r); this.A(r, [{ transform: 'translate(-50%,-50%) scale(.1)', opacity: 1 }, { transform: `translate(-50%,-50%) scale(${4 * size})`, opacity: 0 }], { duration: 700, easing: 'cubic-bezier(.1,.8,.3,1)' }); this.later(() => r.remove(), 750); },
+  crack(n = 1) { // jagged fracture lines on the "glass"
+    const svg = $('#celeb .ccrack'); const W = innerWidth, H = innerHeight;
+    for (let k = 0; k < n; k++) {
+      let x = W * (0.2 + Math.random() * 0.6), y = H * (0.2 + Math.random() * 0.6); const pts = [[x, y]];
+      const a = Math.random() * 6.28; for (let i = 0; i < 9; i++) { x += Math.cos(a + (Math.random() - 0.5) * 1.4) * 60; y += Math.sin(a + (Math.random() - 0.5) * 1.4) * 60; pts.push([x, y]); }
+      svg.insertAdjacentHTML('beforeend', `<polyline points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="2"/><polyline points="${pts.map((p) => `${p[0] + 2},${p[1] + 1}`).join(' ')}" fill="none" stroke="rgba(0,0,0,.6)" stroke-width="2"/>`);
+    }
+  },
+  bolt() {
+    const svg = $('#celeb .ccrack'); const W = innerWidth, H = innerHeight;
+    let x = W * (0.15 + Math.random() * 0.7), y = 0; const pts = [[x, y]];
+    while (y < H * 0.75) { x += (Math.random() - 0.5) * 120; y += 40 + Math.random() * 50; pts.push([x, y]); }
+    const id = 'b' + Math.random().toString(36).slice(2);
+    svg.insertAdjacentHTML('beforeend', `<polyline id="${id}" points="${pts.map((p) => p.join(',')).join(' ')}" fill="none" stroke="#fff" stroke-width="6" style="filter:drop-shadow(0 0 12px #9fd4ff)"/>`);
+    this.later(() => document.getElementById(id)?.remove(), 160);
+    FX.flash('rgba(220,235,255,.9)');
+  },
+  countUp(amount, dur, at, coins) {
+    const el = $('#celeb .cnum'); if (!el) return;
+    const steps = Math.min(30, Math.max(8, Math.round(dur / 60)));
+    for (let i = 0; i <= steps; i++) this.later(() => {
+      const v = Math.round(amount * Math.pow(i / steps, 1.6));
+      el.textContent = '+$' + fmt(v);
+      this.A(el, [{ transform: 'scale(1.35)' }, { transform: 'scale(1)' }], { duration: 120, fill: 'none' });
+      coins ? Sfx.coin(0, 0.12) : Sfx.tick(i);
+      if (i === steps) { this.A(el, [{ transform: 'scale(2)', color: '#fff' }, { transform: 'scale(1)' }], { duration: 400, easing: 'cubic-bezier(.3,1.8,.5,1)' }); Sfx.kick(0, 0.6); }
+    }, at + (dur * i) / steps);
+  },
   // ---- pixel particles ----
   spawn(kind, n, opt = {}) {
     const W = this.cv.width, H = this.cv.height;
     for (let i = 0; i < n; i++) {
-      const p = { kind, x: opt.x ?? Math.random() * W, y: opt.y ?? -10 - Math.random() * H * 0.3, vx: (Math.random() - 0.5) * (opt.spread ?? 1.5), vy: opt.vy != null ? opt.vy * (0.55 + Math.random() * 0.9) : 0.6 + Math.random() * 1.6, life: opt.life ?? 240, g: opt.g ?? 0.04, size: opt.size ?? 3, col: opt.col, ch: opt.ch, rot: Math.random() * 6 };
-      if (opt.burst) { const a = Math.random() * 6.28, s = 0.8 + Math.random() * (opt.burst); p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s; }
+      const p = { kind, x: opt.x ?? Math.random() * W, y: opt.y ?? -10 - Math.random() * H * 0.3, vx: (Math.random() - 0.5) * (opt.spread ?? 1.5), vy: opt.vy != null ? opt.vy * (0.55 + Math.random() * 0.9) : 0.6 + Math.random() * 1.6, life: opt.life ?? 240, g: opt.g ?? 0.04, size: opt.size ?? 3, col: Array.isArray(opt.col) ? opt.col[(Math.random() * opt.col.length) | 0] : opt.col, ch: opt.ch, rot: Math.random() * 6 };
+      if (opt.burst) { const a = Math.random() * 6.28, sp = 0.8 + Math.random() * opt.burst; p.vx = Math.cos(a) * sp; p.vy = Math.sin(a) * sp; }
       this.parts.push(p);
     }
     if (!this.raf) this.raf = requestAnimationFrame(() => this.tick());
   },
+  firework(col) { const W = this.cv.width, H = this.cv.height; this.parts.push({ kind: 'firework', x: W * (0.15 + Math.random() * 0.7), y: H, vx: (Math.random() - 0.5) * 0.6, vy: -3.8 - Math.random(), g: 0.05, life: 38 + (Math.random() * 15 | 0), size: 2, col }); if (!this.raf) this.raf = requestAnimationFrame(() => this.tick()); },
   tick() {
     const { x, cv } = this; x.clearRect(0, 0, cv.width, cv.height);
     this.parts = this.parts.filter((p) => {
-      p.vy += p.g; p.x += p.vx; p.y += p.vy; p.life--; p.rot += 0.1;
-      if (p.kind === 'firework' && p.life <= 0) { this.spawn('spark', 40, { x: p.x, y: p.y, burst: 2.6, g: 0.03, life: 70, col: p.col, size: 2 }); return false; }
+      p.vy += p.g; p.x += p.vx; p.y += p.vy; p.life--; p.rot += 0.12;
+      if (p.kind === 'firework' && p.life <= 0) { this.spawn('spark', 46, { x: p.x, y: p.y, burst: 2.8, g: 0.03, life: 70, col: p.col, size: 2 }); Sfx.snare(0, 0.25); return false; }
       if (p.life <= 0 || p.y > cv.height + 20) return false;
-      const a = Math.min(1, p.life / 40); x.globalAlpha = a;
+      x.globalAlpha = Math.min(1, p.life / 40);
       if (p.kind === 'suit') { x.fillStyle = p.col; x.font = `${p.size * 5}px monospace`; x.fillText(p.ch, p.x | 0, p.y | 0); }
       else if (p.kind === 'coin') { const w = Math.max(1, Math.abs(Math.cos(p.rot)) * p.size * 2) | 0; x.fillStyle = '#b5830f'; x.fillRect((p.x - w / 2) | 0, p.y | 0, w, p.size * 2); x.fillStyle = '#ffd84a'; x.fillRect((p.x - w / 2) | 0, p.y | 0, Math.max(1, w - 1), p.size * 2 - 1); }
       else if (p.kind === 'confetti') { x.fillStyle = p.col; x.fillRect(p.x | 0, p.y | 0, Math.max(1, Math.abs(Math.sin(p.rot)) * p.size * 2) | 0, p.size); }
@@ -321,111 +396,201 @@ const Celebrate = {
   },
   stop() {
     this.timers.forEach(clearTimeout); this.timers = [];
-    this.parts = []; const el = $('#celeb'); if (el) { el.hidden = true; el.className = ''; }
+    this.anims.forEach((a) => { try { a.cancel(); } catch {} }); this.anims = [];
+    this.parts = [];
+    const el = $('#celeb'); if (el) { el.hidden = true; el.className = ''; el.querySelector('.ccrack').innerHTML = ''; }
+    document.body.classList.remove('fx-glitch', 'fx-tilt');
   },
 
-  // returns how long it runs (ms), from the shared table so the server waits the same
   play(g) {
     const best = Poker.bestWin(g);
     if (!best) return 0;
     this.stop();
+    Sfx.init();
     const tier = Poker.celebTier(best.h.score);
-    const ms = Poker.CELEB_MS ? Poker.CELEB_MS[tier] : Poker.celebMs(g);
+    const ms = Poker.CELEB_MS[tier];
     const el = $('#celeb');
     this.cv = $('#celebFx'); this.x = this.cv.getContext('2d');
-    this.cv.width = Math.round(innerWidth / 4); this.cv.height = Math.round(innerHeight / 4); // chunky pixels
-    const cards = best.h.cards;
-    const core = coreCards(cards, best.h.score);
-    const order = tier === 9 ? cards.slice().sort((a, b) => '23456789TJQKA'.indexOf(a[0]) - '23456789TJQKA'.indexOf(b[0])) : cards;
+    this.cv.width = Math.round(innerWidth / 4); this.cv.height = Math.round(innerHeight / 4);
+    const W = this.cv.width, H = this.cv.height;
+    const cards = best.h.cards, core = coreCards(cards, best.h.score);
+    const order = tier >= 8 ? cards.slice().sort((a, b) => '23456789TJQKA'.indexOf(a[0]) - '23456789TJQKA'.indexOf(b[0])) : cards;
     const NAMES = ['HIGH CARD', 'ONE PAIR', 'TWO PAIR', 'THREE OF A KIND', 'STRAIGHT', 'FLUSH', 'FULL HOUSE', 'FOUR OF A KIND', 'STRAIGHT FLUSH', 'ROYAL FLUSH'];
-    const ko = tier === 9 ? '로 열 플 러 시' : best.h.name;
-    const who = esc(best.w.name);
-    el.className = `t${tier}`; el.hidden = false;
-    el.style.setProperty('--dur', ms + 'ms');
-    const title = tier >= 7
-      ? `<span class="big" data-t="${NAMES[tier]}">${NAMES[tier].split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('')}</span><span class="ko">${ko}</span>`
-      : `<span class="big">${NAMES[tier].split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('')}</span><span class="ko">${ko}</span>`;
-    el.querySelector('.ctitle').innerHTML = tier === 0 ? `<span class="ko">${ko}</span>` : title;
-    el.querySelector('.csub').innerHTML = `${who} · +$${fmt(best.w.amount)}`;
+    const letters = (t) => t.split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('');
+    el.className = `t${tier}`; el.hidden = false; el.style.setProperty('--dur', ms + 'ms');
+    const suit = cards[0][1];
+    el.style.setProperty('--suit', { s: '#c9c2a8', c: '#7fbf6a', h: '#ff3a2a', d: '#ff8a2a' }[suit]);
+    el.querySelector('.cbig').textContent = SUIT_CH[suit];
+    el.querySelector('.ctitle').innerHTML = tier === 0 ? `<span class="ko">${best.h.name}</span>` : `<span class="big">${letters(NAMES[tier])}</span><span class="ko">${tier === 9 ? '로 티 플 !!!' : best.h.name}</span>`;
+    el.querySelector('.csub').innerHTML = `${esc(best.w.name)} <span class="cnum">+$0</span>`;
     el.querySelector('.ccards').innerHTML = tier === 0 ? '' : order.map((c, i) => `<span class="cc ${core.has(c) ? 'core' : 'kicker'}" style="--i:${i}">${cardHTML(c, 'lg')}</span>`).join('');
-    // restart CSS animations
     el.querySelectorAll('*').forEach((n) => { n.style.animation = 'none'; void n.offsetWidth; n.style.animation = ''; });
-
+    const cc = [...el.querySelectorAll('.cc')], coreEls = cc.filter((n) => n.classList.contains('core'));
+    const title = el.querySelector('.ctitle'), big = el.querySelector('.ctitle .big'), ltr = [...el.querySelectorAll('.ctitle .big i')];
     const S = typeof Scene3D !== 'undefined' ? Scene3D : null;
-    const coreIdx = order.map((c, i) => (core.has(c) ? i : -1)).filter((i) => i >= 0);
-    const suitCol = { s: '#e8e2c8', c: '#9fc28a', h: '#ff4a3a', d: '#ff8a3a' };
+    const BOUNCE = 'cubic-bezier(.3,1.9,.5,1)';
+    const dealIn = (stagger = 70, from = 'translateY(-160px) rotate(-25deg) scale(.5)') => cc.forEach((n, i) => this.A(n, [{ transform: from, opacity: 0 }, { transform: 'translateY(10px) scale(1.15,.85)', opacity: 1, offset: 0.6 }, { transform: 'none', opacity: 1 }], { duration: 480, delay: i * stagger, easing: BOUNCE }));
+    const titleIn = (at = 300) => { ltr.forEach((n, i) => this.A(n, [{ transform: 'translateY(40px) scale(.3,1.8)', opacity: 0 }, { transform: 'translateY(-14px) scale(1.25,.75)', opacity: 1, offset: 0.55 }, { transform: 'none', opacity: 1 }], { duration: 520, delay: at + i * 38, easing: BOUNCE })); this.A(el.querySelector('.ctitle .ko'), [{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1)', opacity: 1 }], { duration: 400, delay: at + 250, easing: BOUNCE }); };
+    const clack = (a, b, at, note, col) => { // two cards lean in and smash together
+      this.A(a, [{ transform: 'none' }, { transform: 'translateX(26px) rotate(14deg) translateY(-26px)', offset: 0.5 }, { transform: 'translateY(-14px)' }], { duration: 380, delay: at, easing: BOUNCE });
+      this.A(b, [{ transform: 'none' }, { transform: 'translateX(-26px) rotate(-14deg) translateY(-26px)', offset: 0.5 }, { transform: 'translateY(-14px)' }], { duration: 380, delay: at, easing: BOUNCE });
+      this.later(() => { Sfx.bell(note, 0, 0.4); Sfx.boom(0, 0.5); Sfx.snare(0, 0.35); this.punch(1.03); const r = a.getBoundingClientRect(); this.spawn('spark', 26, { x: (r.right / 4), y: (r.top + r.height / 2) / 4, burst: 2.4, col: col || '#ffe08a', life: 40 }); }, at + 190);
+    };
+    // dim the felt behind
+    this.A(el.querySelector('.cbg'), [{ opacity: 0 }, { opacity: 1, offset: 0.08 }, { opacity: 1, offset: 0.88 }, { opacity: 0 }], { duration: ms });
+    this.A(el, [{ opacity: 1 }, { opacity: 1, offset: 0.93 }, { opacity: 0 }], { duration: ms, fill: 'none' });
+
     switch (tier) {
-      case 0: this.xylo(2, 80, 0.2); break;
-      case 1: // tidy: two clean hops
-        this.run([0, 1, 2, 3, 4].map((k) => 4 + k), 70, 0, 0.12);
-        coreIdx.forEach((i, k) => this.xylo(9 + k * 2, 650 + k * 180));
+      case 0: // deadpan
+        this.A(title, [{ transform: 'translateY(-20px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 300, easing: BOUNCE });
+        Sfx.bwomp(0.05);
+        this.countUp(best.w.amount, 300, 200);
         break;
-      case 2:
-        this.run([4, 5, 6, 7, 8], 60, 0, 0.12);
-        coreIdx.forEach((i, k) => this.xylo(7 + k, 600 + k * 140));
-        this.later(() => this.run([10, 12], 120), 1250);
+
+      case 1: // a clean, satisfying clack
+        dealIn(60); titleIn(250);
+        Sfx.bell(72, 0.05, 0.25); Sfx.bell(76, 0.12, 0.2);
+        clack(coreEls[0], coreEls[1], 650, 79);
+        this.later(() => Sfx.stab(C.I, 0, 0.6, 0.1), 900);
+        this.countUp(best.w.amount, 700, 1000);
         break;
-      case 3:
-        this.run([3, 4, 5, 6, 7], 55, 0, 0.12);
-        coreIdx.forEach((i, k) => this.later(() => { this.xylo(5 + k * 2, 0, 0.45); FX.sfx('thud'); FX.shake(false); }, 600 + k * 260));
-        this.later(() => this.run([10, 11, 12, 15], 70), 1450);
-        break;
-      case 4: // a run up the scale as each card lights
-        order.forEach((c, k) => this.xylo(5 + k, 500 + k * 130, 0.4));
-        this.later(() => { this.run([10, 12, 14, 15, 17], 55); S && S.shake(false); }, 1250);
-        this.later(() => this.spawn('spark', 30, { y: this.cv.height * 0.45, vy: -1.5, spread: 3, col: '#ffe08a' }), 1250);
-        break;
-      case 5: { // suit rain
-        const s = cards[0][1];
-        this.run([5, 7, 9, 10, 12, 14, 15, 17], 60);
-        this.spawn('suit', 70, { ch: SUIT_CH[s], col: suitCol[s], size: 3 });
-        this.later(() => this.spawn('suit', 50, { ch: SUIT_CH[s], col: suitCol[s], size: 4 }), 700);
-        this.later(() => this.run([15, 14, 12, 15, 17, 20], 80), 1500);
+
+      case 2: { // two clacks, two punches
+        dealIn(55); titleIn(250);
+        const pairs = []; const val = (n) => n.textContent.trim()[0];
+        coreEls.forEach((n) => { const p = pairs.find((q) => val(q[0]) === val(n) && q.length < 2); p ? p.push(n) : pairs.push([n]); });
+        clack(pairs[0][0], pairs[0][1], 600, 76);
+        if (pairs[1]) clack(pairs[1][0], pairs[1][1], 1000, 83);
+        this.later(() => { Sfx.stab(C.IV, 0, 0.35, 0.12); Sfx.stab(C.I, 0.22, 0.6, 0.14); Sfx.kick(0.22); this.punch(1.05); }, 1350);
+        this.later(() => coreEls.forEach((n, i) => this.A(n, [{ transform: 'translateY(-14px)' }, { transform: 'translateY(-40px) scale(.9,1.15)', offset: 0.4 }, { transform: 'translateY(-14px) scale(1.15,.85)', offset: 0.75 }, { transform: 'translateY(-14px)' }], { duration: 420, delay: i * 50, iterations: 2, fill: 'forwards' })), 1350);
+        this.countUp(best.w.amount, 800, 1500);
         break;
       }
-      case 6: // coins fountain, big stamp
-        FX.flash('rgba(0,0,0,.6)');
-        this.run([5, 7, 10, 12, 15], 90);
-        this.later(() => { FX.shake(true); FX.sfx('raise'); this.spawn('coin', 90, { x: this.cv.width / 2, y: this.cv.height * 0.55, vy: -3.2, spread: 3.2, g: 0.07, size: 3 }); this.run([15, 17, 20, 17, 20, 22], 70); }, 900);
-        this.later(() => this.spawn('coin', 60, { x: this.cv.width / 2, y: this.cv.height * 0.55, vy: -2.6, spread: 4, g: 0.07 }), 1800);
-        S && S.hype(6, ms / 1000);
+
+      case 3: // three hammer blows that crack the screen
+        cc.forEach((n) => this.A(n, [{ opacity: 0 }, { opacity: n.classList.contains('core') ? 0 : 1 }], { duration: 200 }));
+        titleIn(1500);
+        coreEls.forEach((n, k) => {
+          this.A(n, [{ transform: 'translateY(-60px) scale(3.2) rotate(-10deg)', opacity: 0 }, { transform: 'translateY(8px) scale(1.2,.8)', opacity: 1, offset: 0.55 }, { transform: 'none', opacity: 1 }], { duration: 360, delay: 450 + k * 300, easing: 'cubic-bezier(.5,0,.6,1.6)' });
+          this.later(() => { Sfx.boom(0, 0.9); Sfx.bell(55 + k * 4, 0, 0.3); this.punch(1.07, 260); this.crack(2); FX.shake(k === 2); this.spawn('spark', 30, { x: W / 2, y: H * 0.55, burst: 3, col: '#c9c2a8', g: 0.08 }); }, 450 + k * 300 + 200);
+        });
+        this.later(() => { Sfx.stab(C.i, 0, 0.8, 0.16); Sfx.crash(0, 0.4); this.ring('#fff'); }, 1450);
+        this.countUp(best.w.amount, 900, 1700);
         break;
-      case 7: // lights out, four slams with thunder
-        FX.blackout(true); this.later(() => FX.blackout(false), 450);
-        S && S.hype(7, ms / 1000);
-        coreIdx.forEach((i, k) => this.later(() => { this.xylo(0 + k * 2, 0, 0.6); FX.sfx('clunk'); FX.flash('rgba(210,48,31,.45)'); FX.shake(k === coreIdx.length - 1); }, 700 + k * 330));
-        this.later(() => { this.run([10, 12, 15, 17, 20, 22, 25], 55); this.spawn('spark', 120, { x: this.cv.width / 2, y: this.cv.height * 0.45, burst: 3.5, g: 0.05, col: '#ff8a3a' }); }, 2100);
+
+      case 4: // riser, dominoes, DROP
+        el.classList.add('speed');
+        Sfx.riser(0, 1.3);
+        cc.forEach((n, i) => { this.A(n, [{ transform: 'translateX(-120vw) skewX(-25deg)', opacity: 1 }, { transform: 'translateX(14px) skewX(10deg)', offset: 0.7 }, { transform: 'none', opacity: 1 }], { duration: 420, delay: 150 + i * 190, easing: 'cubic-bezier(.2,.9,.3,1.3)' }); this.later(() => { Sfx.whoosh(0, 0.25); Sfx.bell(67 + [0, 2, 4, 7, 9][i], 0, 0.3); }, 150 + i * 190 + 250); });
+        titleIn(1300);
+        this.later(() => { Sfx.boom(0, 1); Sfx.stab(C.I, 0, 0.9, 0.18); Sfx.crash(0, 0.5); this.punch(1.1, 300); this.ring('#ffe08a', 1.5); el.classList.remove('speed'); this.spawn('spark', 70, { x: W / 2, y: H * 0.55, burst: 4, col: ['#ffe08a', '#fff'] }); }, 1350);
+        this.later(() => cc.forEach((n, i) => this.A(n, [{ transform: 'none' }, { transform: 'translateY(-34px) rotate(-8deg)', offset: 0.4 }, { transform: 'none' }], { duration: 380, delay: i * 70, iterations: 3, fill: 'none' })), 1500);
+        [0, 0.4, 0.8].forEach((d) => Sfx.kick(1.55 + d, 0.5));
+        this.countUp(best.w.amount, 1000, 1900);
         break;
-      case 8: // glitch, rainbow, everything
-        S && S.hype(8, ms / 1000);
-        FX.sfx('raise');
-        order.forEach((c, k) => this.xylo(5 + k * 2, 300 + k * 110, 0.45));
-        this.later(() => { FX.shake(true); FX.flash('rgba(255,255,255,.7)'); this.run([10, 12, 14, 15, 17, 19, 20, 22, 24, 25], 45); }, 1000);
-        for (let k = 0; k < 4; k++) this.later(() => { this.spawn('coin', 40, { x: Math.random() * this.cv.width, y: this.cv.height, vy: -4, spread: 2, g: 0.08 }); this.spawn('spark', 50, { x: Math.random() * this.cv.width, y: this.cv.height * 0.4, burst: 3, col: ['#ff4a3a', '#ffd84a', '#5fd4ff', '#9fff7a'][k] }); this.run([20, 22, 25], 60, 0, 0.25); }, 1200 + k * 600);
+
+      case 5: // a giant suit rises on spinning rays; cards cartwheel; harp + choir
+        el.classList.add('rays');
+        this.A(el.querySelector('.cbig'), [{ transform: 'translate(-50%,-50%) scale(0) rotate(-180deg)', opacity: 0 }, { transform: 'translate(-50%,-50%) scale(1.3) rotate(10deg)', opacity: .9, offset: 0.6 }, { transform: 'translate(-50%,-50%) scale(1) rotate(0)', opacity: .8 }], { duration: 900, delay: 200, easing: BOUNCE });
+        this.A(el.querySelector('.cwipe'), [{ transform: 'translateX(-110%) skewX(-20deg)' }, { transform: 'translateX(110%) skewX(-20deg)' }], { duration: 600, easing: 'ease-in-out' });
+        for (let k = 0; k < 14; k++) Sfx.bell(60 + [0, 4, 7, 11, 12, 16, 19, 23, 24, 28, 31, 35, 36, 40][k], 0.05 + k * 0.045, 0.22);
+        cc.forEach((n, i) => this.A(n, [{ transform: 'perspective(400px) rotateY(720deg) scale(.3)', opacity: 0 }, { transform: 'perspective(400px) rotateY(0) scale(1.15)', opacity: 1, offset: 0.7 }, { transform: 'none', opacity: 1 }], { duration: 800, delay: 300 + i * 110, easing: 'cubic-bezier(.2,.8,.3,1.2)' }));
+        titleIn(900);
+        this.later(() => { Sfx.boom(0, 0.9); Sfx.stab(C.vi, 0, 0.4, 0.13); Sfx.stab(C.IV, 0.35, 0.4, 0.13); Sfx.stab(C.I, 0.7, 1.4, 0.15); Sfx.crash(0.7, 0.4); this.punch(1.08, 300); this.spawn('suit', 90, { ch: SUIT_CH[suit], col: getComputedStyle(el).getPropertyValue('--suit').trim(), size: 4 }); }, 1500);
+        this.later(() => { this.punch(1.05); this.spawn('suit', 60, { ch: SUIT_CH[suit], col: '#fff', size: 3 }); }, 2200);
+        this.countUp(best.w.amount, 1100, 2100);
         break;
-      case 9: { // royal flush: silence, spotlight, gold rising one card at a time, then chaos
-        S && S.hype(9, (ms - 1500) / 1000);
-        FX.blackout(true); FX.tense(false); FX.drone(0);
-        this.later(() => FX.blackout(false), 900);
-        order.forEach((c, k) => this.later(() => { this.xylo(5 + k * 2, 0, 0.55); this.xylo(10 + k * 2, 60, 0.3); this.spawn('spark', 16, { x: this.cv.width * (0.3 + k * 0.1), y: this.cv.height * 0.5, burst: 1.6, col: '#ffd84a', life: 50 }); }, 1100 + k * 380));
+
+      case 6: { // slot reels lock in letter by letter, then a coin geyser
+        FX.blackout(true); this.later(() => FX.blackout(false), 250);
+        el.classList.add('rays', 'gold');
+        const GLY = 'ABCDEFGHJKLMNOPQRSTUVWXYZ$#%7♠♥♦♣';
+        ltr.forEach((n, i) => { const fin = n.innerHTML; if (fin === '&nbsp;') return; this.A(n, [{ opacity: 1 }, { opacity: 1 }], { duration: 10 }); const spin = setInterval(() => (n.textContent = GLY[(Math.random() * GLY.length) | 0]), 50); this.timers.push(spin); this.later(() => { clearInterval(spin); n.innerHTML = fin; this.A(n, [{ transform: 'scale(1.8,.5)', color: '#fff' }, { transform: 'none' }], { duration: 260, easing: BOUNCE }); Sfx.coin(0, 0.14); Sfx.kick(0, 0.3); }, 400 + i * 85); });
+        this.A(el.querySelector('.ctitle .ko'), [{ transform: 'scale(0)' }, { transform: 'scale(1)' }], { duration: 400, delay: 1400, easing: BOUNCE });
+        cc.forEach((n, i) => { this.A(n, [{ transform: 'translateY(-90vh)', opacity: 1 }, { transform: 'translateY(12px) scale(1.2,.8)', offset: 0.75 }, { transform: 'none', opacity: 1 }], { duration: 380, delay: 1500 + i * 130, easing: 'cubic-bezier(.5,0,.7,1)' }); this.later(() => { Sfx.kick(0, 0.7); FX.shake(false); }, 1500 + i * 130 + 290); });
         this.later(() => {
-          FX.flash('rgba(255,230,140,.95)'); FX.shake(true); FX.sfx('blast');
-          this.run([10, 12, 14, 15, 17, 19, 20, 22, 24, 25, 27, 29, 30], 40, 0, 0.4);
-          this.spawn('confetti', 160, { col: undefined }); this.parts.slice(-160).forEach((p) => (p.col = ['#ffd84a', '#ff4a3a', '#e8e2c8', '#5fd4ff', '#9fff7a'][(Math.random() * 5) | 0]));
-        }, 3100);
-        for (let k = 0; k < 7; k++) this.later(() => {
-          const W = this.cv.width, H = this.cv.height;
-          this.parts.push({ kind: 'firework', x: W * (0.15 + Math.random() * 0.7), y: H, vx: (Math.random() - 0.5) * 0.6, vy: -3.6 - Math.random(), g: 0.05, life: 40 + (Math.random() * 15 | 0), size: 2, col: ['#ffd84a', '#ff4a3a', '#5fd4ff', '#9fff7a', '#ff8adf'][k % 5] });
-          if (!this.raf) this.raf = requestAnimationFrame(() => this.tick());
-          this.run([15 + (k % 3), 20, 25], 70, 300, 0.25); // jackpot bell
-          if (k % 2) FX.shake(false);
-        }, 3300 + k * 520);
-        this.later(() => this.spawn('suit', 90, { ch: '♠', col: '#ffd84a', size: 4 }), 4200);
-        this.later(() => this.run([25, 24, 22, 20, 22, 25, 30], 90, 0, 0.45), 6200);
+          Sfx.boom(0, 1); Sfx.crash(0, 0.5); Sfx.stab(C.I, 0, 0.3, 0.16); Sfx.stab(C.V, 0.3, 0.3, 0.16); Sfx.stab(C.I, 0.6, 1.2, 0.18);
+          for (let k = 0; k < 10; k++) Sfx.coin(k * 0.07, 0.15);
+          this.punch(1.12, 320); this.ring('#ffd84a', 2); FX.shake(true);
+          this.spawn('coin', 140, { x: W / 2, y: H * 0.6, vy: -4.2, spread: 4.5, g: 0.08, size: 3 });
+        }, 2250);
+        this.later(() => this.spawn('coin', 90, { x: W / 2, y: H * 0.6, vy: -3.6, spread: 5, g: 0.08 }), 2900);
+        S && S.hype(6, ms / 1000);
+        this.countUp(best.w.amount, 1300, 2500, true);
+        break;
+      }
+
+      case 7: // alarm, lightning on each of the four, the glass breaks
+        S && S.hype(7, ms / 1000);
+        FX.blackout(true); this.later(() => FX.blackout(false), 500);
+        el.classList.add('alarm');
+        Sfx.siren(0.1, 2.6);
+        cc.forEach((n) => { if (!n.classList.contains('core')) this.A(n, [{ opacity: 0 }, { opacity: 1 }], { duration: 300, delay: 400 }); else this.A(n, [{ opacity: 0 }, { opacity: 0 }], { duration: 10 }); });
+        coreEls.forEach((n, k) => {
+          const at = 800 + k * 480;
+          this.later(() => { this.bolt(); Sfx.noise && Sfx.play((t) => Sfx.noise(t, 0.25, 0.8, 'highpass', 2000)); Sfx.boom(0, 1); Sfx.bell(48 + k * 5, 0, 0.45); FX.shake(k === 3); this.crack(3); this.punch(1.09, 260); }, at);
+          this.A(n, [{ transform: 'translateY(-80vh) scale(2)', opacity: 0, filter: 'brightness(5)' }, { transform: 'translateY(10px) scale(1.25,.75)', opacity: 1, filter: 'brightness(3)', offset: 0.6 }, { transform: 'none', opacity: 1, filter: 'none' }], { duration: 300, delay: at - 120, easing: 'cubic-bezier(.6,0,.8,1)' });
+        });
+        // the title flies in shattered
+        ltr.forEach((n, i) => this.A(n, [{ transform: `translate(${(Math.random() - 0.5) * 900}px, ${(Math.random() - 0.5) * 600}px) rotate(${(Math.random() - 0.5) * 720}deg) scale(3)`, opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 500, delay: 2900 + i * 20, easing: 'cubic-bezier(.2,1.4,.4,1)' }));
+        this.A(el.querySelector('.ctitle .ko'), [{ transform: 'scale(0)' }, { transform: 'scale(1)' }], { duration: 400, delay: 3300, easing: BOUNCE });
+        this.later(() => { el.classList.remove('alarm'); Sfx.boom(0, 1); Sfx.crash(0, 0.6); Sfx.stab(C.i, 0, 0.35, 0.18); Sfx.stab(C.bVI, 0.35, 0.35, 0.18); Sfx.stab(C.I, 0.7, 1.4, 0.2); this.punch(1.15, 360); this.ring('#ff3a2a', 2); this.spawn('spark', 160, { x: W / 2, y: H * 0.5, burst: 5, g: 0.05, col: ['#ff3a2a', '#ff8a2a', '#ffe08a'] }); }, 3050);
+        this.countUp(best.w.amount, 1300, 3400, true);
+        break;
+
+      case 8: // glitch storm, orbiting cards, wobble drop
+        S && S.hype(8, ms / 1000);
+        document.body.classList.add('fx-glitch');
+        Sfx.riser(0, 2.4, 0.4); Sfx.wobble(0.3, 2.0, 31, 0.35);
+        cc.forEach((n, i) => { const a0 = (i / cc.length) * 360; this.A(n, Array.from({ length: 9 }, (_, k) => ({ transform: `rotate(${a0 + k * 90}deg) translateY(-${200 - k * 14}px) rotate(${-(a0 + k * 90)}deg) scale(${0.6 + k * 0.05})`, opacity: k ? 1 : 0 })).concat([{ transform: 'none', opacity: 1 }]), { duration: 2300, delay: 100, easing: 'ease-in' }); });
+        for (let k = 0; k < 8; k++) this.later(() => { Sfx.whoosh(0, 0.2); Sfx.bell(64 + k * 2, 0, 0.18); }, 200 + k * 260);
+        titleIn(2400);
+        this.later(() => {
+          document.body.classList.remove('fx-glitch'); el.classList.add('rays', 'rainbow');
+          FX.flash('rgba(255,255,255,1)'); Sfx.boom(0, 1); Sfx.boom(0.12, 0.8); Sfx.crash(0, 0.6);
+          Sfx.stab(C.vi, 0, 0.3, 0.17); Sfx.stab(C.IV, 0.3, 0.3, 0.17); Sfx.stab(C.V, 0.6, 0.3, 0.17); Sfx.stab(C.I, 0.9, 1.6, 0.2);
+          this.punch(1.2, 400); this.ring('#5fd4ff', 2.5); FX.shake(true);
+          for (let k = 0; k < 4; k++) this.later(() => { this.firework(['#ff4a3a', '#ffd84a', '#5fd4ff', '#9fff7a'][k]); this.punch(1.05); Sfx.kick(0, 0.6); }, k * 300);
+          this.spawn('coin', 80, { x: W / 2, y: H, vy: -5, spread: 4, g: 0.09 });
+        }, 2450);
+        this.later(() => cc.forEach((n, i) => this.A(n, [{ transform: 'none' }, { transform: 'translateY(-40px) scale(.9,1.15)', offset: 0.4 }, { transform: 'scale(1.15,.85)', offset: 0.75 }, { transform: 'none' }], { duration: 300, delay: i * 40, iterations: 5, fill: 'none' })), 2700);
+        this.countUp(best.w.amount, 1600, 2900, true);
+        break;
+
+      case 9: { // the whole circus
+        S && S.hype(9, (ms - 1500) / 1000);
+        FX.tense(false); FX.drone(0);
+        el.classList.add('royal');
+        Sfx.kick(0.3, 0.5); Sfx.kick(0.6, 0.5); // heartbeat in the dark
+        cc.forEach((n, i) => {
+          const at = 1200 + i * 420;
+          this.A(n, [{ transform: 'translateY(200px) scale(.4)', opacity: 0, filter: 'brightness(.2)' }, { transform: 'translateY(-40px) scale(1.3,.8)', opacity: 1, filter: 'brightness(2.2) drop-shadow(0 0 30px #ffd84a)', offset: 0.6 }, { transform: 'none', opacity: 1, filter: 'brightness(1.25) drop-shadow(0 0 16px #ffd84a)' }], { duration: 600, delay: at, easing: BOUNCE });
+          this.later(() => { Sfx.bell(60 + [0, 4, 7, 12, 16][i], 0, 0.5); Sfx.boom(0, 0.5); this.punch(1.03); this.spawn('spark', 24, { x: W * (0.3 + i * 0.1), y: H * 0.55, burst: 2, col: '#ffd84a', life: 50 }); }, at + 250);
+        });
+        Sfx.riser(3.1, 1.1, 0.5);
+        this.later(() => { // DROP
+          el.classList.add('rays', 'gold');
+          FX.flash('rgba(255,240,180,1)'); FX.shake(true); Sfx.boom(0, 1); Sfx.crash(0, 0.7);
+          this.ring('#ffd84a', 3); this.punch(1.2, 450);
+          this.spawn('confetti', 200, { col: ['#ffd84a', '#ff4a3a', '#e8e2c8', '#5fd4ff', '#9fff7a'] });
+          this.spawn('coin', 120, { x: W / 2, y: H, vy: -5.5, spread: 6, g: 0.09 });
+        }, 4200);
+        titleIn(4250);
+        // brass fanfare on the beat, the screen pulses with it
+        const prog = [C.I, C.I, C.IV, C.IV, C.V, C.V, C.bVI, C.bVII, C.I];
+        prog.forEach((ch, k) => {
+          const at = 4200 + k * 380;
+          this.later(() => { Sfx.stab(ch, 0, k === prog.length - 1 ? 2 : 0.32, 0.17); Sfx.kick(0, 0.8); if (k % 2) Sfx.snare(0, 0.4); this.punch(k === prog.length - 1 ? 1.18 : 1.06, 240); if (k % 2) this.firework(['#ffd84a', '#ff4a3a', '#5fd4ff', '#9fff7a', '#ff8adf'][k % 5]); if (k === prog.length - 1) { Sfx.crash(0, 0.7); FX.shake(true); this.ring('#fff', 3); } }, at);
+        });
+        for (let k = 0; k < 14; k++) this.later(() => Sfx.coin(0, 0.1), 4300 + k * 170);
+        this.later(() => this.spawn('suit', 120, { ch: '♠', col: '#ffd84a', size: 4 }), 5200);
+        this.later(() => { document.body.classList.add('fx-glitch'); this.later(() => document.body.classList.remove('fx-glitch'), 500); }, 6900);
+        this.later(() => cc.forEach((n, i) => this.A(n, [{ transform: 'none' }, { transform: 'translateY(-50px) rotate(-10deg) scale(.9,1.15)', offset: 0.4 }, { transform: 'scale(1.15,.85)', offset: 0.75 }, { transform: 'none' }], { duration: 380, delay: i * 45, iterations: 8, fill: 'none' })), 4300);
+        this.countUp(best.w.amount, 2400, 4600, true);
         break;
       }
     }
-    this.later(() => { el.hidden = true; el.className = ''; }, ms);
+    this.later(() => this.stop(), ms);
     return ms;
   },
 };
