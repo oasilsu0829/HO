@@ -348,7 +348,11 @@ function renderTable(ctx) {
   } else banner.hidden = true;
 
   const myP = g.players.find((p) => p.id === ctx.me);
-  const myCards = myP && myP.hole.length && myP.hole[0] !== '??' ? `<span class="myhand">${myP.hole.map((c) => cardHTML(c, '')).join('')}</span>` : '';
+  // flip my two cards open at the start of each hand (negative delay keeps re-renders from restarting it)
+  if (renderTable.flipHand !== g.handNo) { renderTable.flipHand = g.handNo; renderTable.flipAt = performance.now(); }
+  const flipAge = ((performance.now() - renderTable.flipAt) / 1000).toFixed(2);
+  const myCards = myP && myP.hole.length && myP.hole[0] !== '??'
+    ? `<span class="myhand">${myP.hole.map((c, i) => `<span class="flip" style="animation-delay:${(0.5 + i * 0.35 - flipAge).toFixed(2)}s">${cardHTML(c, '')}</span>`).join('')}</span>` : '';
   ctx.myLine = myP ? `${myCards}<span class="mystack">${esc(myP.name)} · $${fmt(myP.chips)}${isDealer(g, ctx.me) ? ' · D' : ''}${myP.lastAction ? ` · ${myP.lastAction}` : ''}</span>` : '';
   $('#log').innerHTML = g.log.map((l) => `<div>${esc(l)}</div>`).join('');
   $('#log').scrollTop = 1e6;

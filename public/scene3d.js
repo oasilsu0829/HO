@@ -297,11 +297,10 @@ const Scene3D = (() => {
         const m = cardMesh(`h${g.handNo}-${p.id}-${i}`);
         const d = pi * 0.06 + i * 0.25;
         if (s.me) {
-          // held up toward the camera
-          const pos = s.cards.clone().add(new THREE.Vector3((i - 0.5) * 0.18, i * 0.004, i * 0.004));
-          if (p.folded) pos.add(new THREE.Vector3(0, -0.1, -0.35));
-          if (p.folded) pos.y = TABLE_Y + 0.002;
-          setCard(m, c, pos, p.folded ? -Math.PI / 2 : -0.7, 0, (0.5 - i) * 0.12, d);
+          // face down on the felt in front of me; the faces are shown once, in the HUD
+          const pos = new THREE.Vector3((i - 0.5) * 0.19 + 0.02, TABLE_Y + 0.003 + i * 0.002, 0.52);
+          if (p.folded) pos.lerp(new THREE.Vector3(0, TABLE_Y + 0.002, -0.45), 0.6);
+          setCard(m, '??', pos, -Math.PI / 2, 0, (0.5 - i) * 0.1, d);
         } else {
           const side = new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)).multiplyScalar((i - 0.5) * 0.12);
           const pos = s.cards.clone().add(side); pos.y = TABLE_Y + 0.003 + i * 0.002;
