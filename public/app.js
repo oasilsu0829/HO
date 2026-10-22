@@ -456,7 +456,7 @@ const Practice = {
   enter() {
     mode = 'practice';
     show('table');
-    $('#roomInfo').innerHTML = '<b>연습 모드</b> · 언제든 나가도 자동 저장됩니다';
+    $('#roomInfo').innerHTML = '<b>연습 모드</b><span class="wide-only"> · 언제든 나가도 자동 저장됩니다</span>';
     $('#hostCtl').innerHTML = '';
     this.tick();
   },

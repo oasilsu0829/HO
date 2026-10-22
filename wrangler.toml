@@ -1,0 +1,15 @@
+name = "pixel-holdem"
+main = "worker/index.js"
+compatibility_date = "2025-09-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[durable_objects.bindings]]
+name = "CASINO"
+class_name = "Casino"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Casino"]

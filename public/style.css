@@ -400,3 +400,29 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 }
 @keyframes thinking { 0%, 100% { opacity: 1; } 50% { opacity: .4; } }
 .sdwhy small { color: var(--sick); }
+
+/* ---------- phones ---------- */
+@media (max-width: 520px) {
+  .wide-only { display: none; }
+  #topbar { gap: 8px; flex-wrap: nowrap; }
+  #roomInfo { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #table #center { top: max(46px, calc(env(safe-area-inset-top, 0px) + 40px)); gap: 8px; white-space: nowrap; }
+  #street { font-size: 10px; letter-spacing: 1px; }
+  #pot { padding: 3px 8px; font-size: 12px; }
+  #table #actions { gap: 6px; padding-top: 14px; }
+  #actions .btn { font-size: 14px; padding: 9px 12px; }
+  #actions .info { font-size: 12px; gap: 2px 6px; flex-basis: 100%; }
+  .myhand .card { --w: 40px; }
+  .myhand { margin-right: 4px; }
+  .raisebox { gap: 4px; padding: 4px 6px; flex-wrap: nowrap; width: 100%; }
+  .raisebox input[type=range] { width: auto; flex: 1; min-width: 60px; }
+  .raisebox .amt { display: none; }
+  #actions .raisebox .btn.tiny { font-size: 11px; padding: 4px 5px; letter-spacing: 0; }
+  #actions .raisebox [data-q=min] { display: none; }
+  #actions .raisebox [data-a=raise] { padding: 8px 10px; font-size: 13px; white-space: nowrap; }
+  #sdPanel { bottom: 150px; padding: 6px 8px; }
+  .lbl .plate { min-width: 64px; font-size: 11px; padding: 2px 6px; }
+  .bubble { font-size: 11px; }
+  #banner { font-size: 13px; top: 20%; }
+  #stamp { font-size: 36px; }
+}

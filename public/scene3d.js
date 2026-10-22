@@ -11,6 +11,7 @@ const Scene3D = (() => {
   let renderer, scene, camera, lamp, lampBulb, root, labelsEl, tableGroup;
   const camBase = new THREE.Vector3(0, 1.5, 1.55);
   const camLook = new THREE.Vector3(0, 0.95, -0.55);
+  const LOOK_WIDE = camLook.clone(), LOOK_TALL = new THREE.Vector3(0, 0.82, -0.2); // tall screens look further down so the board sits higher
   let shakeT = 0, shakeAmp = 0, flicker = 0;
   const texCache = {};
   const cards = new Map();   // key -> mesh
@@ -177,10 +178,12 @@ const Scene3D = (() => {
     if (w === lastW && h === lastH) return;
     lastW = w; lastH = h;
     renderer.setPixelRatio(1);
-    renderer.setSize(Math.max(160, Math.floor(w * SCALE)), Math.max(120, Math.floor(h * SCALE)), false);
+    const scale = Math.min(w, h) < 600 ? 0.75 : SCALE; // small screens need more pixels to read the cards
+    renderer.setSize(Math.max(160, Math.floor(w * scale)), Math.max(120, Math.floor(h * scale)), false);
     camera.aspect = w / h;
     // portrait screens need a wider field of view to keep the table in frame
     camera.fov = w / h < 1 ? 80 : 60;
+    camLook.copy(w / h < 0.75 ? LOOK_TALL : LOOK_WIDE);
     camera.updateProjectionMatrix();
   }
 
@@ -218,7 +221,9 @@ const Scene3D = (() => {
     others.forEach((p, k) => {
       // left-to-right in seat order (clockwise from my left)
       const t = m === 1 ? 0.5 : k / (m - 1);
-      const a = Math.PI + 0.42 + t * (Math.PI - 0.84); // angle around the table, far side
+      // tall screens see less to the sides, so seat everyone more toward the far edge
+      const edge = window.innerWidth / window.innerHeight < 0.75 ? 0.95 : 0.42;
+      const a = Math.PI + edge + t * (Math.PI - 2 * edge); // angle around the table, far side
       const ex = Math.cos(a), ez = Math.sin(a);
       const fig = new THREE.Vector3(ex * 1.5, 0, ez * 1.3);
       const toward = (r) => new THREE.Vector3(ex * 1.5 * r, TABLE_Y, ez * 1.3 * r);
@@ -414,7 +419,9 @@ const Scene3D = (() => {
     for (let i = 0; i < els.length; i++) {
       const l = labelData[i]; if (!l) continue;
       const v = l.pos.clone().project(camera);
-      els[i].style.transform = `translate(${(v.x * 0.5 + 0.5) * window.innerWidth}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
+      const half = els[i].offsetWidth / 2 + 4; // keep labels on screen
+      const sx = Math.max(half, Math.min(window.innerWidth - half, (v.x * 0.5 + 0.5) * window.innerWidth));
+      els[i].style.transform = `translate(${sx}px, ${(-v.y * 0.5 + 0.5) * window.innerHeight}px) translate(-50%, -100%)`;
       els[i].style.display = v.z > 1 ? 'none' : '';
     }
   }

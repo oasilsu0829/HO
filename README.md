@@ -4,16 +4,30 @@
 
 **하우스 룰:** 플랍이 2장입니다. 바닥 카드가 0 → 2(플랍) → 3(턴) → 4(포스) → 5(리버)장으로 열리고, 베팅 라운드가 5번입니다. 족보는 텍사스 홀덤과 같습니다.
 
-## 실행
+## 실행 방법
+
+### A. Cloudflare에 올리기 (PC 없이, 추천)
+
+`https://pixel-holdem.<내 계정>.workers.dev` 같은 주소가 생기고, 친구들이 폰/아이패드/PC 어디서든 접속합니다.
+방은 Cloudflare 저장소(Durable Object)에 저장돼서 서버가 재시작돼도 유지됩니다. 무료 플랜으로 충분합니다.
+
+1. Cloudflare 대시보드 → **Workers & Pages** → **Create** → **Import a repository** (Git 연결)
+2. GitHub 계정을 연결하고 이 저장소를 선택
+3. 브랜치를 이 코드가 있는 브랜치로 지정, 빌드 명령은 비워두고 배포 명령은 `npx wrangler deploy` (기본값)
+4. **Deploy** → 끝나면 나오는 `*.workers.dev` 주소로 접속
+
+이후 이 브랜치에 푸시할 때마다 자동으로 다시 배포됩니다. 설정은 `wrangler.toml`, 진입점은 `worker/index.js`.
+
+PC에서 직접 배포하려면: `npm install` → `npx wrangler login` → `npm run deploy`
+
+### B. 내 PC에서 돌리기
 
 ```bash
-node server.js          # Node 18+ 필요, npm install 필요 없음 (의존성 0개)
+node server.js          # Node 18+ 필요, npm install 필요 없음
 # → http://localhost:3000
 ```
 
-친구가 접속하려면 같은 와이파이면 `http://<내 PC IP>:3000`,
-밖에서 접속하면 [ngrok](https://ngrok.com) / Cloudflare Tunnel 등으로 3000 포트를 열어주면 됩니다.
-(`PORT=8080 node server.js` 로 포트 변경 가능)
+같은 와이파이의 친구는 `http://<내 PC IP>:3000`. (`PORT=8080 node server.js` 로 포트 변경)
 
 ## 모드
 
@@ -24,7 +38,7 @@ node server.js          # Node 18+ 필요, npm install 필요 없음 (의존성 
 ## 중간에 멈춰도 이어하기
 
 - 연습 모드: 액션마다 브라우저(localStorage)에 자동 저장 → 메뉴의 **이어하기**.
-- 온라인 모드: 방 상태를 `data/rooms.json` 에 저장. 탭을 닫거나 서버를 재시작해도
+- 온라인 모드: 방 상태를 서버에 저장 (PC는 `data/rooms.json`, Cloudflare는 Durable Object). 탭을 닫거나 서버를 재시작해도
   같은 브라우저로 들어오면 자기 자리로 복귀합니다.
   접속이 끊긴 사람 차례가 오면 30초 후 자동 체크/폴드되어 게임이 멈추지 않습니다.
 - 방장이 **일시정지** 하면 현재 핸드까지만 진행하고 대기합니다.
@@ -46,7 +60,9 @@ node server.js          # Node 18+ 필요, npm install 필요 없음 (의존성 
 | `public/poker.js` | 게임 엔진 (족보 판정, 베팅, 사이드팟, 봇 AI) — 브라우저/서버 공용 |
 | `public/scene3d.js` | 1인칭 3D 테이블 (Three.js, `public/vendor/`) |
 | `public/app.js` | 화면, 효과음/연출, 연습 모드, 온라인 클라이언트 |
-| `server.js` | 정적 파일 + JSON API + SSE 실시간 전송, 방 저장 |
+| `hub.js` | 방/게임 진행 로직 (PC 서버와 Cloudflare가 함께 사용) |
+| `server.js` | PC용 서버: 정적 파일 + API + SSE, `data/rooms.json` 저장 |
+| `worker/index.js`, `wrangler.toml` | Cloudflare용 서버: Worker + Durable Object |
 
 ## 아이패드 / 폰
 
