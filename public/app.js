@@ -297,7 +297,7 @@ const Celebrate = {
   spawn(kind, n, opt = {}) {
     const W = this.cv.width, H = this.cv.height;
     for (let i = 0; i < n; i++) {
-      const p = { kind, x: opt.x ?? Math.random() * W, y: opt.y ?? -10 - Math.random() * H * 0.3, vx: (Math.random() - 0.5) * (opt.spread ?? 1.5), vy: opt.vy ?? (0.6 + Math.random() * 1.6), life: opt.life ?? 240, g: opt.g ?? 0.04, size: opt.size ?? 3, col: opt.col, ch: opt.ch, rot: Math.random() * 6 };
+      const p = { kind, x: opt.x ?? Math.random() * W, y: opt.y ?? -10 - Math.random() * H * 0.3, vx: (Math.random() - 0.5) * (opt.spread ?? 1.5), vy: opt.vy != null ? opt.vy * (0.55 + Math.random() * 0.9) : 0.6 + Math.random() * 1.6, life: opt.life ?? 240, g: opt.g ?? 0.04, size: opt.size ?? 3, col: opt.col, ch: opt.ch, rot: Math.random() * 6 };
       if (opt.burst) { const a = Math.random() * 6.28, s = 0.8 + Math.random() * (opt.burst); p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s; }
       this.parts.push(p);
     }
@@ -787,8 +787,12 @@ for (const id of ['pMode', 'oMode']) $('#' + id).addEventListener('change', (e) 
 
 // ---------- execution preview: an empty table and a victim, nothing at stake ----------
 const EXEC_NAMES = { shotgun: '샷건', drop: '바닥 꺼짐', lightsout: '소등', electric: '전기의자' };
+const CELEB_LABELS = ['하이카드', '원페어', '투페어', '트리플', '스트레이트', '플러시', '풀하우스', '포카드', '스티플', '로티플'];
+const CELEB_HANDS = [['As', 'Jd', '8c', '6h', '3s', '2d', '9c'], ['Ah', 'Ad', 'Kc', '9s', '5h', '3d', '2c'], ['Kh', 'Kd', '7c', '7s', 'Ah', '3d', '2c'], ['Qh', 'Qd', 'Qs', '9c', '5h', '3d', '2c'],
+  ['9h', '8d', '7c', '6s', '5h', '2d', 'Kc'], ['Ah', 'Jh', '8h', '5h', '2h', 'Kd', '3c'], ['Kh', 'Kd', 'Kc', '7s', '7h', '3d', '2c'], ['9h', '9d', '9c', '9s', '5h', '3d', '2c'],
+  ['9s', '8s', '7s', '6s', '5s', '2d', 'Kc'], ['As', 'Ks', 'Qs', 'Js', 'Ts', '2d', '3c']];
 const Preview = {
-  g: null, pov: 'them', busy: false,
+  g: null, pov: 'them', busy: false, tab: 'exec',
   enter() {
     mode = 'preview';
     const g = Poker.createGame({});
@@ -796,7 +800,7 @@ const Preview = {
     Poker.addPlayer(g, { id: 'victim', name: '희생양', bot: true });
     this.g = g;
     show('table');
-    $('#roomInfo').innerHTML = '<b>처형 미리보기</b><span class="wide-only"> · 아무것도 걸려있지 않아요</span>';
+    $('#roomInfo').innerHTML = '<b>연출 미리보기</b><span class="wide-only"> · 아무것도 걸려있지 않아요</span>';
     $('#hostCtl').innerHTML = '';
     this.render();
   },
@@ -804,29 +808,37 @@ const Preview = {
     const mk = (label, cls, fn, disabled) => { const b = document.createElement('button'); b.className = `btn ${cls}`; b.textContent = label; b.onclick = fn; b.disabled = !!disabled; return b; };
     renderTable({
       game: Poker.viewFor(this.g, 'me'), me: 'me', legal: null,
-      waitingMsg: this.busy ? '…' : `처형 방식을 고르세요 · 시점: <b>${this.pov === 'me' ? '1인칭 (내가 당함)' : '지켜보기'}</b>`,
-      extraButtons: () => [
+      waitingMsg: this.busy ? '…' : this.tab === 'celeb' ? '보고 싶은 족보를 고르세요' : `처형 방식을 고르세요 · 시점: <b>${this.pov === 'me' ? '1인칭 (내가 당함)' : '지켜보기'}</b>`,
+      extraButtons: () => this.tab === 'celeb' ? [
+        mk('처형 보기', 'gray', () => { this.tab = 'exec'; this.render(); }, this.busy),
+        ...CELEB_LABELS.map((label, tier) => mk(label, tier >= 7 ? 'orange' : tier >= 4 ? 'blue' : 'gray', () => this.celeb(tier), this.busy)),
+        mk('전부 ▶', 'red', () => this.celebAll(), this.busy),
+      ] : [
+        mk('결산 연출 보기', 'orange', () => { this.tab = 'celeb'; this.render(); }, this.busy),
         ...EXECUTIONS.map((m) => mk(EXEC_NAMES[m], 'red', () => this.run(m), this.busy)),
         mk(this.pov === 'me' ? '시점: 1인칭' : '시점: 지켜보기', 'blue', () => { this.pov = this.pov === 'me' ? 'them' : 'me'; this.render(); }, this.busy),
         mk('테이블 청소', 'gray', () => Scene3D.clearStains(), this.busy),
-        mk('결산 연출 ▶', 'orange', () => this.celebAll(), this.busy),
       ],
     });
   },
   // fake a showdown for each tier, one after another
-  celebAll() {
-    const HANDS = [['As', 'Jd', '8c', '6h', '3s', '2d', '9c'], ['Ah', 'Ad', 'Kc', '9s', '5h', '3d', '2c'], ['Kh', 'Kd', '7c', '7s', 'Ah', '3d', '2c'], ['Qh', 'Qd', 'Qs', '9c', '5h', '3d', '2c'],
-      ['9h', '8d', '7c', '6s', '5h', '2d', 'Kc'], ['Ah', 'Jh', '8h', '5h', '2h', 'Kd', '3c'], ['Kh', 'Kd', 'Kc', '7s', '7h', '3d', '2c'], ['9h', '9d', '9c', '9s', '5h', '3d', '2c'],
-      ['9s', '8s', '7s', '6s', '5s', '2d', 'Kc'], ['As', 'Ks', 'Qs', 'Js', 'Ts', '2d', '3c']];
+  fakeShowdown(tier) {
+    const h = Poker.bestHand(CELEB_HANDS[tier]);
+    return { result: { uncontested: false, winners: [{ id: 'victim', name: '희생양', amount: 100 * (tier + 1) * (tier + 1) }], hands: { victim: { name: h.name, cards: h.cards, score: h.score } } } };
+  },
+  celeb(tier) {
+    if (this.busy) return;
     this.busy = true; this.render();
+    FX.audio(); // the tap unlocks sound on phones
+    Celebrate.play(this.fakeShowdown(tier));
+    setTimeout(() => { this.busy = false; if (mode === 'preview') this.render(); }, Poker.CELEB_MS[tier] + 300);
+  },
+  celebAll() {
+    this.busy = true; this.render();
+    FX.audio();
     let at = 0;
-    HANDS.forEach((seven, tier) => {
-      setTimeout(() => {
-        if (mode !== 'preview') return;
-        const h = Poker.bestHand(seven);
-        const fake = { result: { uncontested: false, winners: [{ id: 'victim', name: '희생양', amount: 100 * (tier + 1) * (tier + 1) }], hands: { victim: { name: h.name, cards: h.cards, score: h.score } } } };
-        Celebrate.play(fake);
-      }, at);
+    CELEB_HANDS.forEach((_, tier) => {
+      setTimeout(() => { if (mode === 'preview') Celebrate.play(this.fakeShowdown(tier)); }, at);
       at += Poker.CELEB_MS[tier] + 400;
     });
     setTimeout(() => { this.busy = false; if (mode === 'preview') this.render(); }, at);
