@@ -6,7 +6,7 @@ const Scene3D = (() => {
   const TABLE_Y = 0.78;
   const DECK = new THREE.Vector3(0, TABLE_Y + 0.25, -0.95);
   const SUIT = { s: '♠', h: '♥', d: '♦', c: '♣' };
-  const SUIT_COL = { s: '#1b1d1a', c: '#2c3a24', h: '#8f1d14', d: '#a0441a' };
+  const SUIT_COL = { s: '#111111', c: '#111111', h: '#b3150d', d: '#b3150d' };
 
   let renderer, scene, camera, lamp, lampBulb, root, labelsEl, tableGroup;
   const camBase = new THREE.Vector3(0, 1.5, 1.55);

@@ -163,7 +163,7 @@ input:focus, select:focus { outline: 1px solid var(--sick); }
 .card.lg { --w: 66px; }
 .card.hl { transform: translateY(-8px); box-shadow: 0 0 0 2px var(--ink), 0 0 0 4px var(--bone), 0 0 26px 4px rgba(201,194,168,.45); }
 .card.dim { filter: brightness(.35) sepia(.4); }
-.suit-s { --sc: #1b1d1a; } .suit-c { --sc: #2c3a24; } .suit-h { --sc: #8f1d14; } .suit-d { --sc: #a0441a; }
+.suit-s, .suit-c { --sc: #111; } .suit-h, .suit-d { --sc: #b3150d; }
 @keyframes deal { from { transform: translate(0, -60px) rotate(-12deg); opacity: 0; } }
 .mine .card:not(.empty):not(.back) { animation: deal .3s ease-out, breathe 4s ease-in-out infinite .3s; }
 @keyframes breathe { 50% { transform: translateY(-2px) rotate(.6deg); } }
