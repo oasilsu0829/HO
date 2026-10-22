@@ -23,6 +23,7 @@ const Scene3D = (() => {
   let sweep = null;          // win cinematic state
   let tourState = null;      // showdown close-ups
   let stareId = null, stareAmt = 0;
+  let lookPoint = null;
   let execs = [];            // running executions
   const deadPose = {};       // playerId -> 'slump' | 'limp' | 'gone'
   const headless = {};       // playerId -> true once their head is gone
@@ -64,21 +65,6 @@ const Scene3D = (() => {
       x.font = '22px monospace'; x.fillText(SUIT[c[1]], 6, 34);
       x.font = '44px monospace'; x.textAlign = 'right'; x.textBaseline = 'bottom'; x.fillText(SUIT[c[1]], w - 4, h - 2);
     }));
-  }
-  function maskTex(seed) {
-    return canvasTex(32, 32, (x, w, h) => {
-      const r = (n) => { seed = (seed * 9301 + 49297) % 233280; return (seed / 233280) * n; };
-      x.fillStyle = ['#c9c2a8', '#b9ad8a', '#9d9786', '#d1c7a0'][Math.floor(r(4))];
-      x.fillRect(0, 0, w, h);
-      x.fillStyle = 'rgba(0,0,0,.25)'; for (let i = 0; i < 12; i++) x.fillRect(r(w), r(h), 1, r(4) + 1);
-      x.fillStyle = '#000';
-      const ey = 10 + Math.floor(r(4)), eh = 3 + Math.floor(r(3));
-      x.fillRect(7, ey, 6, eh); x.fillRect(19, ey, 6, eh);
-      const style = Math.floor(r(3));
-      if (style === 0) for (let i = 8; i < 25; i += 3) x.fillRect(i, 23, 2, 2);          // stitched mouth
-      else if (style === 1) x.fillRect(10, 23, 12, 2);                                  // flat slit
-      else { x.fillRect(9, 22, 14, 1); x.fillRect(9, 25, 14, 1); for (let i = 9; i < 24; i += 2) x.fillRect(i, 22, 1, 4); } // teeth
-    });
   }
   function feltTex() {
     return canvasTex(128, 80, (x, w, h) => {
@@ -127,15 +113,8 @@ const Scene3D = (() => {
     lampBulb.position.set(0, 2.52, -0.1); scene.add(lampBulb);
     const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 2), new THREE.MeshBasicMaterial({ color: 0x111111 }));
     cord.position.set(0, 3.7, -0.1); scene.add(cord);
-    // red exit light far back, for menace
-    const red = new THREE.PointLight(0x8f1d14, 0.8, 4); red.position.set(-2.2, 1.8, -3); scene.add(red);
 
-    // room
-    const wallMat = new THREE.MeshLambertMaterial({ color: 0x14170f });
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshLambertMaterial({ color: 0x0c0d0a }));
-    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(12, 5), wallMat); back.position.set(0, 2.5, -3.4); scene.add(back);
-    for (const sx of [-1, 1]) { const w = new THREE.Mesh(new THREE.PlaneGeometry(8, 5), wallMat); w.position.set(sx * 3.4, 2.5, 0); w.rotation.y = -sx * Math.PI / 2; scene.add(w); }
+    buildRoom();
 
     // table
     tableGroup = new THREE.Group(); scene.add(tableGroup);
@@ -197,26 +176,207 @@ const Scene3D = (() => {
     camera.updateProjectionMatrix();
   }
 
+  // ---------- the room ----------
+  function tiledTex(w, h, rx, ry, draw) { const t = canvasTex(w, h, draw); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(rx, ry); return t; }
+  let dust = null, shaft = null;
+  function buildRoom() {
+    const floorTex = tiledTex(64, 64, 10, 10, (x, w, h) => {
+      for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) { x.fillStyle = (tx + ty) % 2 ? '#1c1d18' : '#2a2a22'; x.fillRect(tx * 32, ty * 32, 32, 32); }
+      x.fillStyle = '#0c0c0a'; for (let k = 0; k <= 64; k += 32) { x.fillRect(k, 0, 1, 64); x.fillRect(0, k, 64, 1); }
+      for (let i = 0; i < 300; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * 0.35})`; x.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+      x.fillStyle = 'rgba(50,8,5,.35)'; x.beginPath(); x.arc(44, 18, 6, 0, 7); x.fill();
+    });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshLambertMaterial({ map: floorTex }));
+    floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+    const wallTex = tiledTex(64, 64, 6, 3, (x, w, h) => {
+      x.fillStyle = '#26271f'; x.fillRect(0, 0, w, h);
+      for (let by = 0; by < h; by += 16) for (let bx = (by / 16) % 2 ? -16 : 0; bx < w; bx += 32) { x.fillStyle = `rgb(${34 + Math.random() * 10},${35 + Math.random() * 8},${28 + Math.random() * 6})`; x.fillRect(bx + 1, by + 1, 30, 14); }
+      for (let i = 0; i < 200; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * 0.4})`; x.fillRect(Math.random() * w, Math.random() * h, 1, 1 + Math.random() * 4); }
+      x.fillStyle = 'rgba(20,25,10,.45)'; for (let i = 0; i < 6; i++) x.fillRect(Math.random() * w, 0, 2, h * Math.random()); // damp streaks
+    });
+    const wallMat = new THREE.MeshLambertMaterial({ map: wallTex });
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(12, 5), wallMat); back.position.set(0, 2.5, -3.4); back.receiveShadow = true; scene.add(back);
+    for (const sx of [-1, 1]) { const w = new THREE.Mesh(new THREE.PlaneGeometry(8, 5), wallMat); w.position.set(sx * 3.4, 2.5, 0); w.rotation.y = -sx * Math.PI / 2; scene.add(w); }
+    const ceil = new THREE.Mesh(new THREE.PlaneGeometry(12, 12), new THREE.MeshLambertMaterial({ color: 0x0a0a08 })); ceil.rotation.x = Math.PI / 2; ceil.position.y = 4.2; scene.add(ceil);
+
+    const rust = new THREE.MeshLambertMaterial({ color: 0x3a2a1e });
+    const iron = new THREE.MeshLambertMaterial({ color: 0x2a2b27 });
+    // iron door with a peephole, red bulb above it
+    const doorTex = canvasTex(32, 64, (x, w, h) => {
+      x.fillStyle = '#3a2e24'; x.fillRect(0, 0, w, h);
+      for (let i = 0; i < 120; i++) { x.fillStyle = `rgba(${90 + Math.random() * 40},${40 + Math.random() * 20},10,${Math.random() * 0.5})`; x.fillRect(Math.random() * w, Math.random() * h, 2, 2); }
+      x.fillStyle = '#1a1510'; for (const y of [6, 30, 54]) x.fillRect(2, y, 28, 2);
+      x.fillStyle = '#050505'; x.fillRect(11, 14, 10, 6); x.fillStyle = '#6a6a5a'; x.fillRect(24, 34, 3, 4);
+    });
+    const door = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 2.1), new THREE.MeshLambertMaterial({ map: doorTex })); door.position.set(-1.9, 1.05, -3.38); scene.add(door);
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.16, 2.22, 0.06), iron); frame.position.set(-1.9, 1.1, -3.4); scene.add(frame);
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3a24 })); bulb.position.set(-1.9, 2.4, -3.3); scene.add(bulb);
+    const red = new THREE.PointLight(0x8f1d14, 1.1, 4.5); red.position.set(-1.9, 2.3, -3.0); scene.add(red);
+    // pipes along the walls
+    const pipe = (a, b, r) => scene.add(limb(a, b, r, rust));
+    pipe(new THREE.Vector3(-3.4, 3.4, -3.3), new THREE.Vector3(3.4, 3.4, -3.3), 0.06);
+    pipe(new THREE.Vector3(-3.4, 3.15, -3.32), new THREE.Vector3(3.4, 3.15, -3.32), 0.035);
+    pipe(new THREE.Vector3(2.6, 0, -3.3), new THREE.Vector3(2.6, 3.4, -3.3), 0.05);
+    pipe(new THREE.Vector3(3.3, 3.3, -3.3), new THREE.Vector3(3.3, 3.3, 2), 0.06);
+    pipe(new THREE.Vector3(-3.3, 2.9, -3.3), new THREE.Vector3(-3.3, 2.9, 2), 0.05);
+    // shelf of bottles on the right
+    const shelfWood = new THREE.MeshLambertMaterial({ color: 0x2a1c12 });
+    for (const y of [1.2, 1.75]) {
+      const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.04, 1.6), shelfWood); shelf.position.set(3.22, y, -1.6); scene.add(shelf);
+      for (let k = 0; k < 7; k++) {
+        if (Math.random() < 0.25) continue;
+        const glass = new THREE.MeshLambertMaterial({ color: [0x24401c, 0x4a2a10, 0x1a2a2a, 0x3a1010][(Math.random() * 4) | 0] });
+        const hgt = 0.18 + Math.random() * 0.14;
+        const bt = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.04, hgt, 6), glass); bt.position.set(3.2, y + hgt / 2 + 0.02, -2.3 + k * 0.22); scene.add(bt);
+        const nk = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.015, 0.07, 5), glass); nk.position.set(3.2, y + hgt + 0.05, -2.3 + k * 0.22); scene.add(nk);
+      }
+    }
+    // crates in the corner
+    const crateTex = canvasTex(32, 32, (x, w, h) => {
+      x.fillStyle = '#3a2816'; x.fillRect(0, 0, w, h);
+      x.fillStyle = '#1e140a'; x.fillRect(0, 0, w, 2); x.fillRect(0, h - 2, w, 2); x.fillRect(0, 0, 2, h); x.fillRect(w - 2, 0, 2, h);
+      for (let i = 0; i < 32; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * 0.3})`; x.fillRect(0, i, w, 1); }
+      x.fillStyle = '#2a1c0e'; for (let i = 0; i < w; i++) x.fillRect(i, i, 2, 2);
+    });
+    const crateMat = new THREE.MeshLambertMaterial({ map: crateTex });
+    for (const [cx, cy, cz, s, ry] of [[2.7, 0.3, -2.7, 0.6, 0.2], [2.85, 0.85, -2.75, 0.5, -0.1], [2.1, 0.25, -2.9, 0.5, 0.5], [-2.9, 0.3, 1.0, 0.6, 0.3]]) {
+      const c = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), crateMat); c.position.set(cx, cy, cz); c.rotation.y = ry; c.castShadow = true; c.receiveShadow = true; scene.add(c);
+    }
+    // chains hanging out of the dark
+    for (const [cx, cz, len] of [[-2.2, -1.6, 1.6], [2.0, -0.8, 2.1], [-1.2, -2.6, 1.2], [1.4, -2.9, 1.8]]) {
+      for (let k = 0; k < len / 0.09; k++) {
+        const link = new THREE.Mesh(new THREE.TorusGeometry(0.03, 0.008, 3, 6), iron);
+        link.position.set(cx, 4.2 - k * 0.09, cz); link.rotation.y = k % 2 ? Math.PI / 2 : 0; scene.add(link);
+      }
+      const hook = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.012, 3, 8, Math.PI * 1.4), iron); hook.position.set(cx, 4.2 - len - 0.07, cz); scene.add(hook);
+    }
+    // the beam of the lamp, and dust drifting through it
+    shaft = new THREE.Mesh(new THREE.ConeGeometry(1.15, 1.7, 16, 1, true), new THREE.MeshBasicMaterial({ color: 0xe8e0b0, transparent: true, opacity: 0.018, depthWrite: false, side: THREE.DoubleSide }));
+    shaft.position.set(0, 1.62, -0.1); scene.add(shaft);
+    const n = 70, pos = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { const a = Math.random() * 6.3, rr = Math.random() * 1.1; pos[i * 3] = Math.cos(a) * rr; pos[i * 3 + 1] = 0.85 + Math.random() * 1.6; pos[i * 3 + 2] = -0.1 + Math.sin(a) * rr; }
+    const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    dust = new THREE.Points(dg, new THREE.PointsMaterial({ color: 0xd8d0a0, size: 0.007, transparent: true, opacity: 0.35, depthWrite: false }));
+    scene.add(dust);
+  }
+
   // ---------- figures ----------
+  // ---------- masks ----------
+  const MASKS = ['porcelain', 'sack', 'gasmask', 'grin', 'plague'];
+  function maskFace(style, seed) {
+    return canvasTex(64, 80, (x, w, h) => {
+      const r = (n) => { seed = (seed * 9301 + 49297) % 233280; return (seed / 233280) * n; };
+      const px = (c, X, Y, W = 1, H = 1) => { x.fillStyle = c; x.fillRect(X, Y, W, H); };
+      const grime = (alpha) => { for (let i = 0; i < 160; i++) px(`rgba(0,0,0,${r(alpha)})`, r(w) | 0, r(h) | 0, 1 + (r(2) | 0), 1 + (r(3) | 0)); };
+      if (style === 'porcelain') {
+        px('#cfc7ad', 0, 0, w, h); grime(0.18);
+        for (let i = 0; i < 3; i++) { let cx = r(w) | 0, cy = r(h) | 0; for (let k = 0; k < 14; k++) { px('#5b5546', cx, cy); cx += (r(3) | 0) - 1; cy += 1; } } // cracks
+        px('#000', 14, 26, 12, 9); px('#000', 38, 26, 12, 9);   // hollow eyes
+        px('#2a2620', 13, 35, 14, 2); px('#2a2620', 37, 35, 14, 2); // tear stains
+        px('#3a0a06', 18, 37, 2, 10); px('#3a0a06', 44, 37, 2, 7);
+        px('#000', 26, 56, 12, 3);                              // thin mouth
+      } else if (style === 'sack') {
+        px('#7a6644', 0, 0, w, h);
+        for (let y = 0; y < h; y += 2) for (let X = (y / 2) % 2; X < w; X += 2) px('rgba(40,30,15,.35)', X, y); // weave
+        grime(0.25);
+        const X_ = (cx, cy) => { for (let k = -5; k <= 5; k++) { px('#1a120a', cx + k, cy + k, 2, 2); px('#1a120a', cx + k, cy - k, 2, 2); } };
+        X_(20, 30); X_(44, 30);                                  // stitched-shut eyes
+        for (let X = 14; X < 50; X += 4) { px('#1a120a', X, 56, 3, 1); px('#1a120a', X + 1, 54, 1, 5); } // sewn mouth
+        px('#4a0a06', 30, 60, 3, 8);
+      } else if (style === 'gasmask') {
+        px('#23251f', 0, 0, w, h); grime(0.3);
+        for (const cx of [20, 44]) { px('#55584c', cx - 10, 24, 20, 18); px('#0b0d0a', cx - 8, 26, 16, 14); px('#6f8a6a', cx - 5, 28, 4, 3); } // lenses with a glint
+        px('#3a3d34', 24, 50, 16, 20); px('#15170f', 26, 54, 12, 2); px('#15170f', 26, 60, 12, 2); px('#15170f', 26, 66, 12, 2);
+      } else if (style === 'grin') {
+        px('#bfb79a', 0, 0, w, h); grime(0.22);
+        px('#000', 12, 20, 14, 14); px('#000', 38, 20, 14, 14);  // deep sockets
+        px('#e8e2c8', 17, 25, 3, 3); px('#e8e2c8', 43, 25, 3, 3); // pinprick pupils
+        px('#000', 6, 48, 52, 18);                               // the grin
+        for (let X = 7; X < 57; X += 4) { px('#e3dcc0', X, 48, 3, 7); px('#e3dcc0', X + 1, 59, 3, 7); }
+        px('#000', 4, 46, 3, 4); px('#000', 57, 46, 3, 4);
+      } else {
+        px('#2b2a26', 0, 0, w, h); grime(0.2);                   // plague doctor: dark leather, glass eyes
+        for (const cx of [20, 44]) { px('#5a4a2a', cx - 9, 22, 18, 18); px('#131510', cx - 7, 24, 14, 14); px('#8a6b3a', cx - 4, 26, 3, 3); }
+        for (let y = 0; y < h; y += 9) px('rgba(0,0,0,.4)', 0, y, w, 1);
+      }
+    });
+  }
+  function jacketFront(coat, shirt, tie) {
+    return canvasTex(48, 56, (x, w, h) => {
+      const hex = (c) => '#' + c.toString(16).padStart(6, '0');
+      x.fillStyle = hex(coat); x.fillRect(0, 0, w, h);
+      x.fillStyle = hex(shirt); x.beginPath(); x.moveTo(15, 0); x.lineTo(33, 0); x.lineTo(24, 30); x.fill();
+      x.fillStyle = hex(tie); x.fillRect(22, 2, 4, 26);
+      x.fillStyle = 'rgba(0,0,0,.35)'; x.beginPath(); x.moveTo(10, 0); x.lineTo(15, 0); x.lineTo(24, 32); x.lineTo(20, 32); x.fill(); x.beginPath(); x.moveTo(38, 0); x.lineTo(33, 0); x.lineTo(24, 32); x.lineTo(28, 32); x.fill(); // lapels
+      x.fillStyle = 'rgba(0,0,0,.5)'; for (const by of [36, 44]) x.fillRect(23, by, 2, 2); // buttons
+      for (let i = 0; i < 90; i++) { x.fillStyle = `rgba(0,0,0,${Math.random() * 0.2})`; x.fillRect(Math.random() * w, Math.random() * h, 1, 1); }
+    });
+  }
+
+  // a cylinder stretched between two points, for arms
+  function limb(a, b, r, mat) {
+    const d = b.clone().sub(a);
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r * 0.9, d.length(), 6), mat);
+    m.position.copy(a).addScaledVector(d, 0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    m.castShadow = true;
+    return m;
+  }
+
   function makeFigure(id, i) {
     const g = new THREE.Group();
     let seed = 0; for (const ch of String(id)) seed = (seed * 31 + ch.charCodeAt(0)) % 100000;
-    const coat = [0x1d1f1a, 0x231b16, 0x161a1d, 0x1f1a20][seed % 4];
-    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.28, 0.75, 8), new THREE.MeshLambertMaterial({ color: coat }));
-    body.position.y = 1.0; body.castShadow = true; g.add(body);
-    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.14, 0.26), new THREE.MeshLambertMaterial({ color: coat }));
-    shoulders.position.y = 1.32; g.add(shoulders);
+    const coat = [0x1d1f1a, 0x2a1d16, 0x161b20, 0x231a24, 0x2b2a22][seed % 5];
+    const shirt = [0x8f8a78, 0x5d1410, 0x6e6a5c][seed % 3];
+    const tie = [0x5d0e09, 0x101010, 0x2f3a28, 0x3a2a12][(seed >> 2) % 4];
+    const coatMat = new THREE.MeshLambertMaterial({ color: coat });
+    const skin = new THREE.MeshLambertMaterial({ color: 0x7d7562 });
+    // chair behind them
+    const wood = new THREE.MeshLambertMaterial({ color: 0x24170e });
+    // the chair lives outside the body group so it stays upright when they slump (an empty chair when they vanish)
+    const chair = new THREE.Group();
+    const back = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.8, 0.05), wood); back.position.set(0, 1.0, -0.28); back.castShadow = true; chair.add(back);
+    for (const px of [-0.24, 0.24]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.95, 0.05), wood); post.position.set(px, 0.9, -0.28); chair.add(post); }
+    const seat = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.05, 0.45), wood); seat.position.set(0, 0.5, -0.08); chair.add(seat);
+    // torso with a suit front
+    const torsoMats = [coatMat, coatMat, coatMat, coatMat, new THREE.MeshLambertMaterial({ map: jacketFront(coat, shirt, tie) }), coatMat];
+    const torso = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.6, 0.26), torsoMats);
+    torso.position.y = 1.07; torso.castShadow = true; g.add(torso);
+    const shoulders = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.12, 0.28), coatMat);
+    shoulders.position.y = 1.33; shoulders.castShadow = true; g.add(shoulders);
+    const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 6), skin); neck.position.y = 1.42; g.add(neck);
+    // arms down to the table
+    for (const sx of [-1, 1]) {
+      const sh = new THREE.Vector3(sx * 0.29, 1.3, 0.02), el = new THREE.Vector3(sx * 0.34, 0.92, 0.16), wr = new THREE.Vector3(sx * 0.23, TABLE_Y + 0.04, 0.38);
+      g.add(limb(sh, el, 0.065, coatMat));
+      g.add(limb(el, wr, 0.055, coatMat));
+    }
+    // head: material slot 4 (+z) is the mask; accessories ride along as children
+    const style = MASKS[seed % MASKS.length];
     const headMat = [0, 0, 0, 0, 0, 0].map(() => new THREE.MeshLambertMaterial({ color: 0x8a8370 }));
-    headMat[4] = new THREE.MeshLambertMaterial({ map: maskTex(seed + 7) }); // +z face = mask
+    headMat[4] = new THREE.MeshLambertMaterial({ map: maskFace(style, seed + 7) });
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.3, 0.22), headMat);
     head.position.y = 1.58; head.castShadow = true; g.add(head);
-    // eye glints, lit when it's their turn
+    if (style === 'sack') { headMat.forEach((m, k) => k !== 4 && m.color.setHex(0x6a5838)); const rope = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 4, 10), new THREE.MeshLambertMaterial({ color: 0x4a3a20 })); rope.rotation.x = Math.PI / 2; rope.position.y = -0.14; head.add(rope); }
+    if (style === 'gasmask') { headMat.forEach((m, k) => k !== 4 && m.color.setHex(0x1d1f1a)); const can = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.05, 0.1, 8), new THREE.MeshLambertMaterial({ color: 0x3b3e33 })); can.rotation.x = Math.PI / 2; can.position.set(0, -0.08, 0.15); head.add(can); }
+    if (style === 'plague') { headMat.forEach((m, k) => k !== 4 && m.color.setHex(0x23221e)); const beak = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.26, 6), new THREE.MeshLambertMaterial({ color: 0x3a362c })); beak.rotation.x = Math.PI / 2; beak.position.set(0, -0.05, 0.22); beak.castShadow = true; head.add(beak); }
+    if (style === 'grin') { head.scale.y = 1.15; }
+    // some wear hats
+    const hat = (seed >> 3) % 3;
+    if (hat && style !== 'sack') {
+      const felt = new THREE.MeshLambertMaterial({ color: 0x121210 });
+      const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.02, 10), felt); brim.position.y = 0.16; head.add(brim);
+      const crown = hat === 1 ? new THREE.Mesh(new THREE.SphereGeometry(0.125, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2), felt) : new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.125, 0.24, 10), felt);
+      crown.position.y = hat === 1 ? 0.165 : 0.29; crown.castShadow = true; head.add(crown);
+      if (hat === 2) { const band = new THREE.Mesh(new THREE.CylinderGeometry(0.127, 0.127, 0.035, 10), new THREE.MeshLambertMaterial({ color: 0x4a0b07 })); band.position.y = 0.2; head.add(band); }
+    }
+    // eye glints, lit when it's their turn (children of the head so they follow its gaze)
     const eyeMat = new THREE.MeshBasicMaterial({ color: 0xd2301f, transparent: true, opacity: 0 });
-    for (const ex of [-0.05, 0.05]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(0.035, 0.018), eyeMat); e.position.set(ex, 1.61, 0.112); g.add(e); }
+    for (const ex of [-0.055, 0.055]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(0.035, 0.018), eyeMat); e.position.set(ex, 0.03, 0.112); head.add(e); }
     // hands resting on the table
-    const handMat = new THREE.MeshLambertMaterial({ color: 0x8a8370 });
-    for (const hx of [-0.22, 0.22]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.12), handMat); hnd.position.set(hx, TABLE_Y + 0.02, 0.42); hnd.castShadow = true; g.add(hnd); }
-    g.userData = { head, eyeMat, bob: (seed % 100) / 100 * 6, pid: id };
+    const hands = [];
+    for (const hx of [-0.22, 0.22]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.12), skin); hnd.position.set(hx, TABLE_Y + 0.02, 0.42); hnd.castShadow = true; g.add(hnd); hands.push(hnd); }
+    g.userData = { chair, head, eyeMat, torso, shoulders, hands, bob: (seed % 100) / 100 * 6, pid: id };
     g.rotation.order = 'YXZ'; // yaw outermost so rotation.x tilts toward/away from the table
     return g;
   }
@@ -290,6 +450,10 @@ const Scene3D = (() => {
     const reveal = new Set();
     if (g.street === 'showdown' && g.result) for (const w of g.result.winners) for (const c of g.result.hands?.[w.id]?.cards || []) reveal.add(c);
 
+    // where everyone glances: the player to act (me = the camera)
+    const actor = g.players[g.toAct];
+    lookPoint = !actor ? camera.position.clone() : seatPos[actor.id]?.me ? camera.position.clone() : seatPos[actor.id]?.figure ? seatPos[actor.id].figure.clone().setY(1.55) : null;
+
     // figures
     const live = new Set();
     for (const p of g.players) {
@@ -297,7 +461,7 @@ const Scene3D = (() => {
       if (s.me) continue;
       live.add(p.id);
       let f = figures.get(p.id);
-      if (!f) { f = makeFigure(p.id); scene.add(f); figures.set(p.id, f); f.position.copy(s.figure); }
+      if (!f) { f = makeFigure(p.id); scene.add(f); scene.add(f.userData.chair); figures.set(p.id, f); f.position.copy(s.figure); }
       // busted and not yet seen dying (e.g. after a reload): just slumped
       if (p.chips === 0 && !p.inHand && !deadPose[p.id]) deadPose[p.id] = 'slump';
       if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; delete headless[p.id]; f.visible = true; f.userData.head.visible = true; f.userData.head.material.forEach((m, i) => m.color.setHex(i === 4 ? 0xffffff : 0x8a8370)); f.rotation.x = 0; f.rotation.z = 0; f.position.copy(s.figure); }
@@ -307,7 +471,7 @@ const Scene3D = (() => {
       f.userData.shaky = p.tell === 'shaky' && !p.folded && g.street !== 'showdown';
       f.userData.thinking = f.userData.turn;
     }
-    for (const [id, f] of figures) if (!live.has(id)) { scene.remove(f); figures.delete(id); }
+    for (const [id, f] of figures) if (!live.has(id)) { scene.remove(f); scene.remove(f.userData.chair); figures.delete(id); }
 
     // hole cards
     g.players.forEach((p, pi) => {
@@ -394,6 +558,7 @@ const Scene3D = (() => {
     for (const s of chips.values()) s.position.lerp(s.userData.pos, 1 - Math.pow(0.002, dt));
     for (const f of figures.values()) {
       const u = f.userData;
+      u.chair.position.set(u.target.x, 0, u.target.z); u.chair.rotation.y = f.rotation.y;
       if (u.exec) continue; // an execution is driving this one
       const dead = deadPose[u.pid];
       if (dead === 'gone') { f.visible = false; continue; }
@@ -403,6 +568,17 @@ const Scene3D = (() => {
       u.head.visible = !headless[u.pid];
       if (dead) { u.head.rotation.x = dead === 'limp' ? 0.6 : 0.2; u.eyeMat.opacity = 0; continue; }
       u.head.position.y = 1.58 + Math.sin(t / 900 + u.bob) * 0.008 - (u.out ? 0.08 : 0);
+      const breath = Math.sin(t / 1100 + u.bob);
+      u.torso.scale.set(1 + breath * 0.012, 1 + breath * 0.008, 1 + breath * 0.02);
+      u.shoulders.position.y = 1.33 + breath * 0.005;
+      // glance at whoever is acting (or at me), the actor looks down at their cards
+      let yawT = 0;
+      if (lookPoint && !u.turn && !u.out) {
+        const lp = f.worldToLocal(lookPoint.clone());
+        yawT = Math.max(-0.7, Math.min(0.7, Math.atan2(lp.x, lp.z)));
+      }
+      u.head.rotation.y += (yawT - u.head.rotation.y) * 0.06;
+      u.hands.forEach((h, k) => { h.position.y = TABLE_Y + 0.02 + (u.turn ? Math.max(0, Math.sin(t / 110 + k * 1.7)) * 0.025 : 0); });
       u.head.rotation.x = u.out ? 0.35 : u.turn ? -0.08 + Math.sin(t / 600) * 0.04 : 0;
       // a tell: the head and hands tremble
       u.head.rotation.z = u.shaky ? Math.sin(t / 38) * 0.03 : 0;
@@ -429,6 +605,7 @@ const Scene3D = (() => {
     if (sweep) stepSweep(dt, cp, cl);
     if (execs.length) stepExecs(dt, cp, cl, t);
     if (particles.length) stepParticles(dt);
+    if (dust) { dust.rotation.y += dt * 0.03; dust.position.y = Math.sin(t / 4000) * 0.05; dust.material.opacity = 0.35 * lampDim; shaft.material.opacity = 0.018 * lampDim * (lamp.intensity > 2 ? 1 : 0.6); shaft.position.x = lamp.position.x; }
     lamp.intensity = lamp.intensity * lampDim + lampSpike;
     if (lampDim < 0.3) lampBulb.material.color.setHex(0x1a1810);
     zap.intensity = zapLevel;
