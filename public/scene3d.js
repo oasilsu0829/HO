@@ -25,6 +25,11 @@ const Scene3D = (() => {
   let stareId = null, stareAmt = 0;
   let execs = [];            // running executions
   const deadPose = {};       // playerId -> 'slump' | 'limp' | 'gone'
+  const headless = {};       // playerId -> true once their head is gone
+  let gore = true;
+  let particles = [], stains = null, stainList = [];
+  const BLOOD = 0x6a0905, BLOOD_DARK = 0x1e0201;
+  let dropGeo = null, bloodMat = null, stainMat = null;
   let lampDim = 1, lampSpike = 0, zapLevel = 0, zap = null, gunProto = null, eyesProto = null;
   const camCur = new THREE.Vector3(0, 1.5, 1.55), lookCur = new THREE.Vector3(0, 0.95, -0.55);
   let hands = null;
@@ -295,7 +300,7 @@ const Scene3D = (() => {
       if (!f) { f = makeFigure(p.id); scene.add(f); figures.set(p.id, f); f.position.copy(s.figure); }
       // busted and not yet seen dying (e.g. after a reload): just slumped
       if (p.chips === 0 && !p.inHand && !deadPose[p.id]) deadPose[p.id] = 'slump';
-      if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; f.visible = true; f.rotation.x = 0; f.rotation.z = 0; }
+      if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; delete headless[p.id]; f.visible = true; f.userData.head.visible = true; f.userData.head.material.forEach((m, i) => m.color.setHex(i === 4 ? 0xffffff : 0x8a8370)); f.rotation.x = 0; f.rotation.z = 0; }
       f.userData.target = s.figure; f.rotation.y = s.yaw;
       f.userData.turn = g.players[g.toAct]?.id === p.id;
       f.userData.out = (p.folded && g.street !== 'waiting') || (p.chips === 0 && !p.inHand);
@@ -395,6 +400,7 @@ const Scene3D = (() => {
       f.visible = true;
       f.position.lerp(u.target, 0.1);
       f.rotation.x += ((dead === 'slump' ? 0.6 : dead === 'limp' ? -0.25 : 0) - f.rotation.x) * 0.1;
+      u.head.visible = !headless[u.pid];
       if (dead) { u.head.rotation.x = dead === 'limp' ? 0.6 : 0.2; u.eyeMat.opacity = 0; continue; }
       u.head.position.y = 1.58 + Math.sin(t / 900 + u.bob) * 0.008 - (u.out ? 0.08 : 0);
       u.head.rotation.x = u.out ? 0.35 : u.turn ? -0.08 + Math.sin(t / 600) * 0.04 : 0;
@@ -422,6 +428,7 @@ const Scene3D = (() => {
     const cp = camCur.clone(), cl = lookCur.clone();
     if (sweep) stepSweep(dt, cp, cl);
     if (execs.length) stepExecs(dt, cp, cl, t);
+    if (particles.length) stepParticles(dt);
     lamp.intensity = lamp.intensity * lampDim + lampSpike;
     if (lampDim < 0.3) lampBulb.material.color.setHex(0x1a1810);
     zap.intensity = zapLevel;
@@ -531,6 +538,65 @@ const Scene3D = (() => {
     shade.position.set(0, -0.04, -0.01); eyesProto.add(shade);
     for (const ex of [-0.055, 0.055]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 0.012), red); e.position.x = ex; eyesProto.add(e); }
     zap = new THREE.PointLight(0x6aa8ff, 0, 3); scene.add(zap);
+    dropGeo = new THREE.BoxGeometry(1, 1, 1);
+    bloodMat = new THREE.MeshLambertMaterial({ color: BLOOD });
+    stainMat = new THREE.MeshLambertMaterial({ color: BLOOD_DARK, transparent: true, opacity: 0.92, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
+    stains = new THREE.Group(); scene.add(stains);
+  }
+
+  // ---------- blood ----------
+  const onTable = (x, z) => Math.abs(x) < 1.48 && Math.abs(z) < 0.94;
+  function stain(x, y, z, size, wall) {
+    // a lumpy low-poly blob rather than a square
+    const m = new THREE.Mesh(new THREE.CircleGeometry(size / 2, 5 + (Math.random() * 3 | 0)), stainMat);
+    m.scale.y = 0.6 + Math.random() * 0.8;
+    if (wall) m.position.set(x, y, -3.39); else { m.rotation.x = -Math.PI / 2; m.rotation.z = Math.random() * 3; m.position.set(x, y, z); }
+    stains.add(m); stainList.push(m);
+    if (stainList.length > 320) stains.remove(stainList.shift());
+  }
+  // a burst of droplets (or chunks, given a material) that fall, land and leave stains
+  function spray(origin, dir, n, speed, spread, mat, size = 0.022) {
+    if (!gore) return;
+    for (let i = 0; i < n; i++) {
+      if (particles.length > 450) break;
+      const m = new THREE.Mesh(dropGeo, mat || bloodMat);
+      const s = size * (0.5 + Math.random());
+      m.scale.set(s, s, s); m.position.copy(origin);
+      const v = dir.clone().multiplyScalar(speed * (0.5 + Math.random() * 0.7));
+      v.x += (Math.random() - 0.5) * spread; v.y += (Math.random() - 0.3) * spread; v.z += (Math.random() - 0.5) * spread;
+      scene.add(m);
+      particles.push({ m, v, chunk: !!mat, spin: (Math.random() - 0.5) * 12 });
+    }
+  }
+  function stepParticles(dt) {
+    particles = particles.filter((p) => {
+      p.v.y -= 9.8 * dt;
+      p.m.position.addScaledVector(p.v, dt);
+      if (p.chunk) { p.m.rotation.x += p.spin * dt; p.m.rotation.z += p.spin * dt; }
+      const { x, y, z } = p.m.position;
+      if (z < -3.36) { stain(x, y, z, 0.05 + Math.random() * 0.12, true); scene.remove(p.m); return false; }
+      const floor = onTable(x, z) ? TABLE_Y + 0.004 : 0.003;
+      if (y > floor) return true;
+      if (p.chunk) { p.m.position.y = floor + p.m.scale.y / 2; scene.remove(p.m); stains.add(p.m); stainList.push(p.m); return false; }
+      stain(x, floor, z, 0.025 + Math.random() * 0.06);
+      scene.remove(p.m); return false;
+    });
+  }
+  // voxel chunks of a mask, flying off
+  function burstHead(f, dir) {
+    if (!gore) return;
+    const head = f.userData.head;
+    const pos = head.getWorldPosition(new THREE.Vector3());
+    const tex = head.material[4];
+    const mats = [tex, new THREE.MeshLambertMaterial({ color: 0x8a8370 }), bloodMat, new THREE.MeshLambertMaterial({ color: 0x5a0805 })];
+    spray(pos, dir, 14, 3.2, 1.6, null, 0.06); // big gobbets first
+    for (let i = 0; i < 12; i++) spray(pos, dir, 1, 2.6, 1.8, mats[i % mats.length], 0.07);
+    spray(pos, dir.clone().add(new THREE.Vector3(0, 0.4, 0)), 70, 3.6, 1.4);
+  }
+  function clearStains() {
+    if (!stains) return;
+    for (const m of stainList) stains.remove(m);
+    stainList = [];
   }
 
   const sfx = (k) => window.FX && window.FX.sfx(k);
@@ -580,7 +646,11 @@ const Scene3D = (() => {
       g.lookAt(head);
       g.scale.setScalar(Math.min(1, k / 0.4));
       cue(e, 'rack', 1.1, () => sfx('rack'));
-      cue(e, 'bang', 1.8, () => { sfx('blast'); lampSpike = 6; fx((F) => F.shake(false)); });
+      cue(e, 'bang', 1.8, () => {
+        sfx('blast'); lampSpike = 6; fx((F) => F.shake(false));
+        if (gore) { sfx('splat'); burstHead(f, side.clone().negate().add(new THREE.Vector3(0, 0.25, 0))); headless[e.id] = true; u.head.visible = false; }
+      });
+      if (gore && k > 1.85 && k < 3.0 && Math.random() < 0.5) spray(head.clone().setY(1.42 - (k > 2.3 ? 0.25 : 0)).addScaledVector(fwd, k > 2.3 ? 0.3 : 0), new THREE.Vector3(0, 1, 0).addScaledVector(fwd, 0.5), 3, 1.2, 0.5);
       if (k > 1.8) {
         const a = Math.min(1, (k - 1.8) / 0.5);
         u.head.rotation.z = -0.6 * Math.exp(-(k - 1.8) * 6);
@@ -592,6 +662,13 @@ const Scene3D = (() => {
       if (k < 0.8) lampDim = sputter();
       cue(e, 'creak', 0.05, () => sfx('creak'));
       cue(e, 'clunk', 0.8, () => { sfx('clunk'); fx((F) => F.shake(false)); });
+      cue(e, 'crunch', 1.35, () => {
+        if (!gore) return;
+        sfx('crunch'); sfx('splat');
+        const hole = f.position.clone().setY(0.05);
+        spray(hole, new THREE.Vector3(0, 1, 0).addScaledVector(fwd, 0.25), 60, 3.4, 1.0);
+        stain(hole.x, 0.002, hole.z, 0.7);
+      });
       if (k > 0.8) {
         f.position.y = -Math.pow(k - 0.8, 2) * 7;
         u.head.rotation.x = -0.35;
@@ -604,6 +681,13 @@ const Scene3D = (() => {
       e.eyes.lookAt(camera.position);
       cue(e, 'whisper', 0.6, () => sfx('whisper'));
       cue(e, 'sting', 1.3, () => sfx('sting'));
+      cue(e, 'wet', 1.35, () => { if (gore) { sfx('crunch'); sfx('splat'); } });
+      cue(e, 'mess', 1.45, () => {
+        if (!gore) return;
+        spray(head, fwd.clone().add(new THREE.Vector3(0, 0.3, 0)), 50, 2.2, 2.2);
+        spray(head.clone().setY(1.0), new THREE.Vector3(0, 0.2, 0), 40, 1.5, 2.6);
+        for (let i = 0; i < 6; i++) { const p = f.position.clone().addScaledVector(fwd, 0.3 + Math.random() * 0.4).addScaledVector(side, (Math.random() - 0.5) * 0.6); stain(p.x, onTable(p.x, p.z) ? TABLE_Y + 0.004 : 0.003, p.z, 0.1 + Math.random() * 0.18); }
+      });
       if (k > 1.4) { f.visible = false; deadPose[e.id] = 'gone'; }
     } else if (e.method === 'electric') {
       cue(e, 'buzz', 0, () => sfx('buzz'));
@@ -616,6 +700,12 @@ const Scene3D = (() => {
         f.rotation.x += (-0.25 - f.rotation.x) * 0.15;
         u.head.rotation.x += (0.6 - u.head.rotation.x) * 0.15;
         deadPose[e.id] = 'limp';
+        if (gore && !e.fired.char) {
+          e.fired.char = 1;
+          for (const m of u.head.material) m.color.setHex(0x3a2a1c);
+          spray(head, new THREE.Vector3(0, -0.2, 0).addScaledVector(fwd, 0.6), 18, 0.9, 0.5);
+        }
+        if (gore && k < 2.8 && Math.random() < 0.3) spray(head.clone().addScaledVector(fwd, 0.12), new THREE.Vector3(0, -1, 0), 1, 0.3, 0.1);
       }
       cue(e, 'pop', 1.9, () => sfx('pop'));
     }
@@ -633,7 +723,7 @@ const Scene3D = (() => {
       cue(e, 'tense', 0, () => fx((F) => F.tense(true)));
       cue(e, 'rack', 1.6, () => sfx('rack'));
       cue(e, 'hush', 2.3, () => fx((F) => { F.tense(false); F.drone(0); }));
-      cue(e, 'bang', 2.7, () => { sfx('blast'); sfx('ring'); fx((F) => { F.flash('rgba(255,255,255,1)'); F.blackout(true); }); });
+      cue(e, 'bang', 2.7, () => { sfx('blast'); sfx('ring'); fx((F) => { F.flash('rgba(255,255,255,1)'); F.blackout(true); if (gore) { F.sfx('splat'); F.splatter(1); } }); });
       cue(e, 'word', 3.3, () => fx((F) => F.stamp('탕.', 'var(--bone)')));
       if (k > 2.7) cp.y += (Math.random() - 0.5) * 0.08 * Math.max(0, 1 - (k - 2.7));
     } else if (e.method === 'drop') {
@@ -642,7 +732,7 @@ const Scene3D = (() => {
       cue(e, 'clunk', 0.7, () => sfx('clunk'));
       if (k > 0.7) { const fall = Math.pow(k - 0.7, 2) * 5; cp.y -= fall; cl.y -= fall * 0.35; }
       cue(e, 'dark', 1.6, () => fx((F) => F.blackout(true)));
-      cue(e, 'thud', 2.1, () => sfx('thud'));
+      cue(e, 'thud', 2.1, () => { sfx('thud'); if (gore) fx((F) => { F.sfx('crunch'); F.splatter(0.6); }); });
     } else if (e.method === 'lightsout') {
       lampDim = k < 0.5 ? sputter() : 0.02;
       const g = e.eyes;
@@ -651,7 +741,7 @@ const Scene3D = (() => {
       g.lookAt(camera.position);
       cue(e, 'whisper', 0.9, () => sfx('whisper'));
       cue(e, 'sting', 2.0, () => sfx('sting'));
-      cue(e, 'dark', 2.15, () => fx((F) => F.blackout(true)));
+      cue(e, 'dark', 2.15, () => fx((F) => { F.blackout(true); if (gore) { F.sfx('crunch'); F.sfx('splat'); F.splatter(1); } }));
     } else if (e.method === 'electric') {
       cue(e, 'buzz', 0, () => sfx('buzz'));
       if (k < 2.2) {
@@ -660,7 +750,7 @@ const Scene3D = (() => {
         zap.position.set(0, 1.2, 1.2); zapLevel = Math.random() < 0.5 ? 3 : 0;
         if (Math.random() < 0.12) fx((F) => F.flash('rgba(90,150,255,.55)'));
       }
-      cue(e, 'pop', 2.2, () => { sfx('pop'); fx((F) => F.blackout(true)); });
+      cue(e, 'pop', 2.2, () => { sfx('pop'); fx((F) => { F.blackout(true); if (gore) F.splatter(0.45); }); });
     }
   }
 
@@ -668,5 +758,7 @@ const Scene3D = (() => {
 
   function stare(id) { stareId = id || null; }
 
-  return { init, update, shake, winSweep, tour, stare, execute };
+  function setGore(v) { gore = !!v; if (!gore) clearStains(); }
+
+  return { init, update, shake, winSweep, tour, stare, execute, setGore, clearStains };
 })();

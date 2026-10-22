@@ -16,6 +16,7 @@ let mode = null; // 'practice' | 'online'
 // ---------- navigation ----------
 function show(id) {
   if (typeof FX !== 'undefined') FX.blackout(false);
+  if (id !== 'table' && typeof Scene3D !== 'undefined' && renderTable.inited) Scene3D.clearStains();
   if (id !== 'table' && typeof FX !== 'undefined') { FX.tense(false); FX.lastSeq = null; FX.lastHand = null; FX.drone(0); }
   document.querySelectorAll('.screen').forEach((s) => (s.hidden = s.id !== id));
   if (id === 'menu') refreshContinue();
@@ -119,6 +120,8 @@ const FX = {
     if (kind === 'buzz') for (let i = 0; i < 18; i++) setTimeout(() => { this.tone(55 + Math.random() * 10, 0.11, 0.25, 'sawtooth'); this.noise(0.1, 2200, 0.25, 'bandpass'); }, i * 105);
     if (kind === 'pop') { this.noise(0.15, 3000, 0.9, 'highpass'); this.tone(90, 0.3, 0.6, 'sine', 40); }
     if (kind === 'ring') this.tone(3600, 2.6, 0.05, 'sine');
+    if (kind === 'splat') { this.noise(0.25, 700, 0.9); setTimeout(() => this.noise(0.18, 500, 0.6), 90); setTimeout(() => this.noise(0.3, 350, 0.4), 220); }
+    if (kind === 'crunch') { this.noise(0.12, 1800, 0.9, 'bandpass'); this.tone(80, 0.25, 0.8, 'square', 40); setTimeout(() => this.noise(0.1, 2600, 0.6, 'bandpass'), 70); }
   },
   shake(big) {
     if (typeof Scene3D !== 'undefined') Scene3D.shake(big);
@@ -143,6 +146,24 @@ const FX = {
     } else if (iWasIn) {
       this.sfx('lose'); this.flash('rgba(143,29,20,.4)');
     }
+  },
+  // pixel blood thrown across the screen, running down
+  splatter(amount) {
+    const el = $('#gore');
+    const w = 160, h = Math.round(160 * innerHeight / innerWidth);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    const blob = (cx, cy, r, col) => { x.fillStyle = col; for (let i = 0; i < r * 3; i++) { const a = Math.random() * 6.3, d = Math.random() * r; x.fillRect(Math.round(cx + Math.cos(a) * d), Math.round(cy + Math.sin(a) * d), 1 + (Math.random() * 2 | 0), 1 + (Math.random() * 2 | 0)); } };
+    const n = Math.round(3 + amount * 7);
+    for (let i = 0; i < n; i++) {
+      const cx = Math.random() * w, cy = Math.random() * h * 0.8, r = 3 + Math.random() * 9 * amount;
+      for (let k = 0; k < 4; k++) blob(cx, cy, r * (1 - k * 0.2), k % 2 ? '#5e0604' : '#8e0e08'); // dense core
+      for (let k = 0; k < r; k++) blob(cx + (Math.random() - 0.5) * r * 4, cy + (Math.random() - 0.5) * r * 4, 1, '#7a0b06'); // spatter
+      const drips = 1 + (Math.random() * 3 | 0);
+      for (let d = 0; d < drips; d++) { x.fillStyle = '#5c0704'; const dx = Math.round(cx + (Math.random() - 0.5) * r); x.fillRect(dx, Math.round(cy), 1 + (Math.random() * 2 | 0), Math.round(r * (1 + Math.random() * 3))); }
+    }
+    el.style.backgroundImage = `url(${c.toDataURL()})`;
+    el.classList.remove('go'); void el.offsetWidth; el.classList.add('go');
   },
   blackout(on, autoOffMs) {
     const b = $('#blackout');
@@ -241,9 +262,14 @@ const FX = {
   },
 };
 window.FX = FX;
+// gore can be turned off for friends who'd rather not
+let goreOn = store.get('ho.gore') !== false;
+const syncGore = () => { $('#btnGore').textContent = goreOn ? '잔혹 ON' : '잔혹 OFF'; if (typeof Scene3D !== 'undefined') Scene3D.setGore(goreOn); };
+$('#btnGore').onclick = () => { goreOn = !goreOn; store.set('ho.gore', goreOn); syncGore(); };
 const syncSound = () => ($('#btnSound').textContent = FX.on ? '소리 ON' : '소리 OFF');
 $('#btnSound').onclick = () => { FX.on = !FX.on; store.set('ho.sound', FX.on); if (!FX.on) FX.tense(false); syncSound(); };
 syncSound();
+syncGore();
 
 // ---------- rendering ----------
 function cardHTML(c, size = '', extra = '') {
