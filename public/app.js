@@ -451,7 +451,7 @@ const Celebrate = {
     this.cv.width = Math.round(innerWidth / 4); this.cv.height = Math.round(innerHeight / 4);
     const W = this.cv.width, H = this.cv.height;
     const cards = best.h.cards, core = coreCards(cards, best.h.score);
-    const order = tier >= 8 ? cards.slice().sort((a, b) => '23456789TJQKA'.indexOf(a[0]) - '23456789TJQKA'.indexOf(b[0])) : cards;
+    const order = tier >= 8 ? cards.slice().reverse() : cards; // straight flushes rise low to high (A-2-3-4-5, 10-J-Q-K-A)
     const NAMES = ['HIGH CARD', 'ONE PAIR', 'TWO PAIR', 'THREE OF A KIND', 'STRAIGHT', 'FLUSH', 'FULL HOUSE', 'FOUR OF A KIND', 'STRAIGHT FLUSH', 'ROYAL FLUSH'];
     const letters = (t) => t.split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('');
     el.className = `t${tier}`; el.hidden = false; el.style.setProperty('--dur', ms + 'ms');

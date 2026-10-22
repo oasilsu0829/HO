@@ -60,7 +60,7 @@
       const by = groups.map((x) => x[1]);
       const cat = groups[0][0] === 4 ? 7 : groups[0][0] === 3 ? 3 : groups[0][0] === 2 ? (groups[1] && groups[1][0] === 2 ? 2 : 1) : 0;
       const score = [cat, ...by];
-      return { score, cards: cards.slice(), name: handName(score) };
+      return { score, cards: sortFive(cards, score), name: handName(score) };
     }
     let best = null;
     const n = cards.length;
@@ -71,7 +71,17 @@
         if (!best || cmp(score, best.score) > 0) best = { score, cards: five };
       }
     best.name = handName(best.score);
+    best.cards = sortFive(best.cards, best.score);
     return best;
+  }
+
+  // Lay the five out the way a player reads them: sets first (biggest group, then rank),
+  // straights high to low with the wheel as 5-4-3-2-A.
+  function sortFive(cards, score) {
+    const cnt = {};
+    for (const c of cards) cnt[rv(c)] = (cnt[rv(c)] || 0) + 1;
+    const key = (c) => (score && (score[0] === 4 || score[0] === 8) && score[1] === 5 && rv(c) === 14 ? 1 : rv(c));
+    return cards.slice().sort((a, b) => cnt[rv(b)] - cnt[rv(a)] || key(b) - key(a) || 'shdc'.indexOf(a[1]) - 'shdc'.indexOf(b[1]));
   }
 
   function handName(score) {
