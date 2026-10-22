@@ -15,6 +15,7 @@ let mode = null; // 'practice' | 'online'
 
 // ---------- navigation ----------
 function show(id) {
+  if (typeof FX !== 'undefined') FX.blackout(false);
   if (id !== 'table' && typeof FX !== 'undefined') { FX.tense(false); FX.lastSeq = null; FX.lastHand = null; FX.drone(0); }
   document.querySelectorAll('.screen').forEach((s) => (s.hidden = s.id !== id));
   if (id === 'menu') refreshContinue();
@@ -110,6 +111,14 @@ const FX = {
     if (kind === 'win') [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, 0.35, 0.2, 'triangle'), i * 90));
     if (kind === 'lose') { this.tone(110, 1.2, 0.4, 'sawtooth', 40); }
     if (kind === 'deal') this.noise(0.06, 3000, 0.25, 'bandpass');
+    if (kind === 'creak') { this.tone(140, 0.9, 0.12, 'sawtooth', 85); this.noise(0.9, 500, 0.25, 'bandpass'); }
+    if (kind === 'clunk') { this.tone(70, 0.3, 0.9, 'square', 32); this.noise(0.25, 400, 0.9); }
+    if (kind === 'thud') this.tone(48, 0.6, 0.5, 'sine', 28);
+    if (kind === 'whisper') for (let i = 0; i < 12; i++) setTimeout(() => { this.tone(180 + Math.random() * 60, 0.05, 0.04, 'sawtooth'); this.noise(0.04, 3000, 0.08, 'highpass'); }, i * 65);
+    if (kind === 'sting') [311, 330, 349, 370].forEach((f) => this.tone(f, 1.1, 0.1, 'sawtooth'));
+    if (kind === 'buzz') for (let i = 0; i < 18; i++) setTimeout(() => { this.tone(55 + Math.random() * 10, 0.11, 0.25, 'sawtooth'); this.noise(0.1, 2200, 0.25, 'bandpass'); }, i * 105);
+    if (kind === 'pop') { this.noise(0.15, 3000, 0.9, 'highpass'); this.tone(90, 0.3, 0.6, 'sine', 40); }
+    if (kind === 'ring') this.tone(3600, 2.6, 0.05, 'sine');
   },
   shake(big) {
     if (typeof Scene3D !== 'undefined') Scene3D.shake(big);
@@ -118,6 +127,28 @@ const FX = {
   flash(color) {
     const f = $('#flash'); f.style.background = color;
     f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+  },
+  // the usual win/lose effects once any executions have played
+  payout(g, me, winners, iWon, iWasIn, big) {
+    if (iWasIn && !iWon && me.allIn) {
+      // the only time the gun goes off: you shoved and lost
+      this.sfx('blast'); this.shake(true); this.flash('rgba(210,48,31,.85)'); this.stamp('탕!');
+    } else if (iWon && me.allIn) {
+      this.sfx('click');
+      this.sweep(g, winners, me);
+      setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); this.stamp(big ? 'JACKPOT' : '생존', 'var(--amber)'); }, 500);
+    } else if (iWon) {
+      this.sweep(g, winners, me);
+      this.sfx('win'); this.flash('rgba(216,160,58,.4)'); if (big) this.stamp('JACKPOT', 'var(--amber)');
+    } else if (iWasIn) {
+      this.sfx('lose'); this.flash('rgba(143,29,20,.4)');
+    }
+  },
+  blackout(on, autoOffMs) {
+    const b = $('#blackout');
+    clearTimeout(this.boT);
+    b.classList.toggle('on', on);
+    if (on && autoOffMs) this.boT = setTimeout(() => b.classList.remove('on'), autoOffMs);
   },
   stamp(text, color) {
     const s = $('#stamp'); s.textContent = text; s.style.color = color || '';
@@ -174,24 +205,24 @@ const FX = {
         const big = winners.reduce((s, w) => s + w.amount, 0) >= g.bb * 20;
         const iWasIn = me.inHand && !me.folded;
         const delay = g.result?.uncontested ? 0 : Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 300;
+        const busted = bustedIn(g);
         setTimeout(() => {
-          if (iWasIn && !iWon && me.allIn) {
-            // the only time the gun goes off: you shoved and lost
-            this.sfx('blast'); this.shake(true); this.flash('rgba(210,48,31,.85)'); this.stamp('탕!');
-          } else if (iWon && me.allIn) {
-            this.sfx('click');
-            this.sweep(g, winners, me);
-            setTimeout(() => { this.sfx('win'); this.flash('rgba(216,160,58,.5)'); this.stamp(big ? 'JACKPOT' : '생존', 'var(--amber)'); }, 500);
-          } else if (iWon) {
-            this.sweep(g, winners, me);
-            this.sfx('win'); this.flash('rgba(216,160,58,.4)'); if (big) this.stamp('JACKPOT', 'var(--amber)');
-          } else if (iWasIn) {
-            this.sfx('lose'); this.flash('rgba(143,29,20,.4)');
+          if (typeof Scene3D !== 'undefined') {
+            if (busted.some((p) => p.id === me.id)) {
+              // my own execution replaces every other effect; online you get to spectate afterwards
+              Scene3D.execute(me.id, executionFor(g, me.id), true);
+              if (mode === 'online') setTimeout(() => this.blackout(false), 6500);
+              return;
+            }
+            busted.forEach((p, i) => setTimeout(() => Scene3D.execute(p.id, executionFor(g, p.id), false), i * 400));
           }
+          const after = busted.length ? 3300 + (busted.length - 1) * 400 : 0;
+          setTimeout(() => this.payout(g, me, winners, iWon, iWasIn, big), after);
         }, delay);
         break;
       }
     }
+
     // bots muttering at the table
     for (const p of g.players) if (p.say && p.say.seq > this.lastVoice && p.id !== me.id) { this.voice(p.say.text, p.name.length + p.say.seq); }
     this.lastVoice = Math.max(this.lastVoice, ...g.players.map((p) => p.say?.seq || 0));
@@ -295,6 +326,16 @@ function renderShowdownPanel(g, meId) {
   el.hidden = false;
   if (typeof Scene3D !== 'undefined') Scene3D.tour(order, REVEAL_PER);
 }
+
+// Who went broke this hand, and how they go out. Seeded so every viewer sees the same execution.
+const EXECUTIONS = ['shotgun', 'drop', 'lightsout', 'electric'];
+const bustedIn = (g) => (g.street === 'showdown' ? g.players.filter((p) => p.inHand && p.chips === 0) : []);
+function executionFor(g, id) {
+  let h = g.handNo * 7919;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return EXECUTIONS[h % EXECUTIONS.length];
+}
+const EXEC_MS = 3600;
 
 let raiseDraft = null; // keep slider value across re-renders of the same decision
 
@@ -487,7 +528,8 @@ const Practice = {
     if (g.street === 'showdown') {
       const alive = g.players.filter((p) => p.chips > 0);
       // let the reveal and the shot play before any popup covers the table
-      const revealMs = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500;
+      const execMs = bustedIn(g).length ? EXEC_MS + 1800 : 0;
+      const revealMs = (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500) + execMs;
       if (me.chips === 0) {
         if (!this.bustShown) { this.bustShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
         this.bustShown = false;
@@ -503,11 +545,12 @@ const Practice = {
         return modal('<h2>🏆 우승!</h2><p>모든 봇을 이겼습니다!</p>', [['메뉴로', 'orange', () => show('menu')]]);
       }
       const reveal = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 : 0;
-      this.timer = setTimeout(() => this.next(), 5000 + reveal);
+      this.timer = setTimeout(() => this.next(), 5000 + reveal + (bustedIn(g).length ? EXEC_MS : 0));
     }
   },
   next() {
     clearTimeout(this.timer);
+    FX.blackout(false);
     Poker.startHand(this.g);
     this.tick();
   },

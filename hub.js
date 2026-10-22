@@ -58,7 +58,9 @@ function createHub(persist, initialRooms = {}) {
     }
   }
 
-  const revealTime = (g) => (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_MS_PER_HAND : 0);
+  const EXEC_MS = 3600; // matches the client's execution scenes
+  const revealTime = (g) => (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_MS_PER_HAND : 0)
+    + (g.players.some((p) => p.inHand && p.chips === 0) ? EXEC_MS : 0);
 
   const newId = (n) => Array.from(globalThis.crypto.getRandomValues(new Uint8Array(n)), (b) => b.toString(16).padStart(2, '0')).join('');
   function roomCode() {

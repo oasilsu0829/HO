@@ -8,7 +8,7 @@ const Scene3D = (() => {
   const SUIT = { s: '♠', h: '♥', d: '♦', c: '♣' };
   const SUIT_COL = { s: '#111111', c: '#111111', h: '#b3150d', d: '#b3150d' };
 
-  let renderer, scene, camera, lamp, lampBulb, root, labelsEl, tableGroup;
+  let renderer, scene, camera, lamp, lampBulb, root, labelsEl, tableGroup, ambient;
   const camBase = new THREE.Vector3(0, 1.5, 1.55);
   const camLook = new THREE.Vector3(0, 0.95, -0.55);
   const LOOK_WIDE = camLook.clone(), LOOK_TALL = new THREE.Vector3(0, 0.82, -0.2); // tall screens look further down so the board sits higher
@@ -23,6 +23,9 @@ const Scene3D = (() => {
   let sweep = null;          // win cinematic state
   let tourState = null;      // showdown close-ups
   let stareId = null, stareAmt = 0;
+  let execs = [];            // running executions
+  const deadPose = {};       // playerId -> 'slump' | 'limp' | 'gone'
+  let lampDim = 1, lampSpike = 0, zapLevel = 0, zap = null, gunProto = null, eyesProto = null;
   const camCur = new THREE.Vector3(0, 1.5, 1.55), lookCur = new THREE.Vector3(0, 0.95, -0.55);
   let hands = null;
   const POT_POS = new THREE.Vector3(-0.05, TABLE_Y, 0.22);
@@ -105,7 +108,8 @@ const Scene3D = (() => {
     scene.fog = new THREE.Fog(0x030403, 3, 7.5);
     camera = new THREE.PerspectiveCamera(58, 1, 0.05, 20);
 
-    scene.add(new THREE.AmbientLight(0x5a6650, 0.75));
+    ambient = new THREE.AmbientLight(0x5a6650, 0.75);
+    scene.add(ambient);
     lamp = new THREE.SpotLight(0xf0e8c8, 3.3, 7, 0.85, 0.5, 1);
     lamp.position.set(0, 2.45, -0.1);
     lamp.target.position.set(0, TABLE_Y, -0.1);
@@ -168,6 +172,7 @@ const Scene3D = (() => {
       hands.add(h);
     }
     hands.visible = false; scene.add(hands);
+    buildExecProps();
     window.addEventListener('resize', resize);
     resize();
     requestAnimationFrame(loop);
@@ -206,7 +211,8 @@ const Scene3D = (() => {
     // hands resting on the table
     const handMat = new THREE.MeshLambertMaterial({ color: 0x8a8370 });
     for (const hx of [-0.22, 0.22]) { const hnd = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.12), handMat); hnd.position.set(hx, TABLE_Y + 0.02, 0.42); hnd.castShadow = true; g.add(hnd); }
-    g.userData = { head, eyeMat, bob: (seed % 100) / 100 * 6 };
+    g.userData = { head, eyeMat, bob: (seed % 100) / 100 * 6, pid: id };
+    g.rotation.order = 'YXZ'; // yaw outermost so rotation.x tilts toward/away from the table
     return g;
   }
 
@@ -287,6 +293,9 @@ const Scene3D = (() => {
       live.add(p.id);
       let f = figures.get(p.id);
       if (!f) { f = makeFigure(p.id); scene.add(f); figures.set(p.id, f); f.position.copy(s.figure); }
+      // busted and not yet seen dying (e.g. after a reload): just slumped
+      if (p.chips === 0 && !p.inHand && !deadPose[p.id]) deadPose[p.id] = 'slump';
+      if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; f.visible = true; f.rotation.x = 0; f.rotation.z = 0; }
       f.userData.target = s.figure; f.rotation.y = s.yaw;
       f.userData.turn = g.players[g.toAct]?.id === p.id;
       f.userData.out = (p.folded && g.street !== 'waiting') || (p.chips === 0 && !p.inHand);
@@ -380,7 +389,13 @@ const Scene3D = (() => {
     for (const s of chips.values()) s.position.lerp(s.userData.pos, 1 - Math.pow(0.002, dt));
     for (const f of figures.values()) {
       const u = f.userData;
+      if (u.exec) continue; // an execution is driving this one
+      const dead = deadPose[u.pid];
+      if (dead === 'gone') { f.visible = false; continue; }
+      f.visible = true;
       f.position.lerp(u.target, 0.1);
+      f.rotation.x += ((dead === 'slump' ? 0.6 : dead === 'limp' ? -0.25 : 0) - f.rotation.x) * 0.1;
+      if (dead) { u.head.rotation.x = dead === 'limp' ? 0.6 : 0.2; u.eyeMat.opacity = 0; continue; }
       u.head.position.y = 1.58 + Math.sin(t / 900 + u.bob) * 0.008 - (u.out ? 0.08 : 0);
       u.head.rotation.x = u.out ? 0.35 : u.turn ? -0.08 + Math.sin(t / 600) * 0.04 : 0;
       // a tell: the head and hands tremble
@@ -406,6 +421,12 @@ const Scene3D = (() => {
     camCur.lerp(want, kc); lookCur.lerp(wantLook, kc);
     const cp = camCur.clone(), cl = lookCur.clone();
     if (sweep) stepSweep(dt, cp, cl);
+    if (execs.length) stepExecs(dt, cp, cl, t);
+    lamp.intensity = lamp.intensity * lampDim + lampSpike;
+    if (lampDim < 0.3) lampBulb.material.color.setHex(0x1a1810);
+    zap.intensity = zapLevel;
+    ambient.intensity = 0.75 * Math.max(0.12, lampDim);
+    lampSpike = Math.max(0, lampSpike - dt * 30);
     camera.position.set(
       cp.x + Math.sin(t / 2300) * 0.015 + (Math.random() - 0.5) * amp,
       cp.y + Math.sin(t / 1700) * 0.01 + (Math.random() - 0.5) * amp,
@@ -490,9 +511,162 @@ const Scene3D = (() => {
     wantLook.copy(tgt);
   }
 
+  // ---------- executions ----------
+  function buildExecProps() {
+    // a sawn-off double barrel, built pointing down +z so lookAt aims it
+    gunProto = new THREE.Group();
+    const metal = new THREE.MeshLambertMaterial({ color: 0x2b2d2a });
+    const wood = new THREE.MeshLambertMaterial({ color: 0x3a2416 });
+    for (const bx of [-0.028, 0.028]) {
+      const b = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.62, 8), metal);
+      b.rotation.x = Math.PI / 2; b.position.set(bx, 0, 0.2); b.castShadow = true; gunProto.add(b);
+    }
+    const hole = new THREE.MeshBasicMaterial({ color: 0x000000 });
+    for (const bx of [-0.028, 0.028]) { const m = new THREE.Mesh(new THREE.CircleGeometry(0.018, 8), hole); m.position.set(bx, 0, 0.512); gunProto.add(m); }
+    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.11, 0.34), wood); stock.position.set(0, -0.03, -0.25); stock.rotation.x = 0.18; gunProto.add(stock);
+    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.06, 0.16), wood); pump.position.set(0, -0.04, 0.12); gunProto.add(pump);
+    eyesProto = new THREE.Group();
+    const red = new THREE.MeshBasicMaterial({ color: 0xff2414 });
+    const shade = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.42), new THREE.MeshBasicMaterial({ color: 0x020202 }));
+    shade.position.set(0, -0.04, -0.01); eyesProto.add(shade);
+    for (const ex of [-0.055, 0.055]) { const e = new THREE.Mesh(new THREE.PlaneGeometry(0.04, 0.012), red); e.position.x = ex; eyesProto.add(e); }
+    zap = new THREE.PointLight(0x6aa8ff, 0, 3); scene.add(zap);
+  }
+
+  const sfx = (k) => window.FX && window.FX.sfx(k);
+  const fx = (fn) => window.FX && fn(window.FX);
+  const DUR = { me: 4.8, other: 3.2 };
+
+  function execute(id, method, me) {
+    const e = { id, method, me, t: 0, fired: {} };
+    if (method === 'shotgun') { e.gun = gunProto.clone(); e.gun.visible = false; scene.add(e.gun); }
+    if (method === 'lightsout') { e.eyes = eyesProto.clone(); e.eyes.visible = false; scene.add(e.eyes); }
+    execs.push(e);
+    return me ? DUR.me : DUR.other;
+  }
+  const cue = (e, key, at, fn) => { if (e.t >= at && !e.fired[key]) { e.fired[key] = 1; fn(); } };
+  const sputter = () => (Math.random() < 0.5 ? 0.15 + Math.random() * 0.3 : 1);
+
+  function stepExecs(dt, cp, cl, t) {
+    lampDim = 1; zapLevel = 0;
+    for (const e of execs) {
+      e.t += dt;
+      if (e.me) stepMine(e, cp, cl); else stepTheirs(e, t);
+    }
+    execs = execs.filter((e) => {
+      const end = e.me ? DUR.me + 1.2 : DUR.other;
+      if (e.t < end) return true;
+      if (e.gun) scene.remove(e.gun);
+      if (e.eyes) scene.remove(e.eyes);
+      const f = figures.get(e.id); if (f) f.userData.exec = false;
+      return false;
+    });
+  }
+
+  // someone else at the table
+  function stepTheirs(e, t) {
+    const f = figures.get(e.id);
+    if (!f) return;
+    const u = f.userData; u.exec = true; u.eyeMat.opacity = 0;
+    const yaw = f.rotation.y;
+    const side = new THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const head = f.position.clone().setY(1.58);
+    const k = e.t;
+    if (e.method === 'shotgun') {
+      const g = e.gun;
+      g.visible = k < 2.4;
+      g.position.copy(head).addScaledVector(side, 0.6 - 0.1 * Math.min(1, k / 0.6)).add(new THREE.Vector3(0, 0.04 + Math.sin(t / 50) * 0.004, 0));
+      g.lookAt(head);
+      g.scale.setScalar(Math.min(1, k / 0.4));
+      cue(e, 'rack', 1.1, () => sfx('rack'));
+      cue(e, 'bang', 1.8, () => { sfx('blast'); lampSpike = 6; fx((F) => F.shake(false)); });
+      if (k > 1.8) {
+        const a = Math.min(1, (k - 1.8) / 0.5);
+        u.head.rotation.z = -0.6 * Math.exp(-(k - 1.8) * 6);
+        f.rotation.x = 0.6 * a;
+        u.head.rotation.x = 0.2 * a;
+        if (k > 2.4) deadPose[e.id] = 'slump';
+      }
+    } else if (e.method === 'drop') {
+      if (k < 0.8) lampDim = sputter();
+      cue(e, 'creak', 0.05, () => sfx('creak'));
+      cue(e, 'clunk', 0.8, () => { sfx('clunk'); fx((F) => F.shake(false)); });
+      if (k > 0.8) {
+        f.position.y = -Math.pow(k - 0.8, 2) * 7;
+        u.head.rotation.x = -0.35;
+        if (k > 1.6) { f.visible = false; deadPose[e.id] = 'gone'; }
+      }
+    } else if (e.method === 'lightsout') {
+      lampDim = k < 0.4 ? sputter() : k < 2.0 ? 0.03 : k < 2.4 ? sputter() : 1;
+      e.eyes.visible = k > 0.5 && k < 1.6;
+      e.eyes.position.copy(head).addScaledVector(fwd, -0.32).add(new THREE.Vector3(0, 0.1, 0));
+      e.eyes.lookAt(camera.position);
+      cue(e, 'whisper', 0.6, () => sfx('whisper'));
+      cue(e, 'sting', 1.3, () => sfx('sting'));
+      if (k > 1.4) { f.visible = false; deadPose[e.id] = 'gone'; }
+    } else if (e.method === 'electric') {
+      cue(e, 'buzz', 0, () => sfx('buzz'));
+      if (k < 1.9) {
+        f.rotation.z = (Math.random() - 0.5) * 0.12;
+        u.head.rotation.set((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.4);
+        zap.position.copy(head); zapLevel = Math.random() < 0.6 ? 1.5 + Math.random() * 3 : 0;
+      } else {
+        f.rotation.z = 0; u.head.rotation.y = 0; u.head.rotation.z = 0;
+        f.rotation.x += (-0.25 - f.rotation.x) * 0.15;
+        u.head.rotation.x += (0.6 - u.head.rotation.x) * 0.15;
+        deadPose[e.id] = 'limp';
+      }
+      cue(e, 'pop', 1.9, () => sfx('pop'));
+    }
+  }
+
+  // me, in first person
+  function stepMine(e, cp, cl) {
+    const k = e.t;
+    if (e.method === 'shotgun') {
+      const g = e.gun;
+      g.visible = k < 2.75;
+      const rise = ease(Math.min(1, k / 1.4));
+      g.position.set(0.06 + Math.sin(k * 23) * 0.003, 0.82 + (1.3 - 0.82) * rise, -0.25 + 0.7 * rise);
+      g.lookAt(camera.position.clone().add(new THREE.Vector3(0.12, -0.05, 0))); // a hair off-axis so it reads as a barrel
+      cue(e, 'tense', 0, () => fx((F) => F.tense(true)));
+      cue(e, 'rack', 1.6, () => sfx('rack'));
+      cue(e, 'hush', 2.3, () => fx((F) => { F.tense(false); F.drone(0); }));
+      cue(e, 'bang', 2.7, () => { sfx('blast'); sfx('ring'); fx((F) => { F.flash('rgba(255,255,255,1)'); F.blackout(true); }); });
+      cue(e, 'word', 3.3, () => fx((F) => F.stamp('탕.', 'var(--bone)')));
+      if (k > 2.7) cp.y += (Math.random() - 0.5) * 0.08 * Math.max(0, 1 - (k - 2.7));
+    } else if (e.method === 'drop') {
+      if (k < 0.7) lampDim = sputter();
+      cue(e, 'creak', 0.05, () => sfx('creak'));
+      cue(e, 'clunk', 0.7, () => sfx('clunk'));
+      if (k > 0.7) { const fall = Math.pow(k - 0.7, 2) * 5; cp.y -= fall; cl.y -= fall * 0.35; }
+      cue(e, 'dark', 1.6, () => fx((F) => F.blackout(true)));
+      cue(e, 'thud', 2.1, () => sfx('thud'));
+    } else if (e.method === 'lightsout') {
+      lampDim = k < 0.5 ? sputter() : 0.02;
+      const g = e.eyes;
+      g.visible = k > 0.8 && k < 2.15;
+      g.position.lerpVectors(new THREE.Vector3(0, 1.55, -2.2), new THREE.Vector3(0, 1.48, 1.25), ease(Math.max(0, (k - 0.8) / 1.3)));
+      g.lookAt(camera.position);
+      cue(e, 'whisper', 0.9, () => sfx('whisper'));
+      cue(e, 'sting', 2.0, () => sfx('sting'));
+      cue(e, 'dark', 2.15, () => fx((F) => F.blackout(true)));
+    } else if (e.method === 'electric') {
+      cue(e, 'buzz', 0, () => sfx('buzz'));
+      if (k < 2.2) {
+        cp.x += (Math.random() - 0.5) * 0.06; cp.y += (Math.random() - 0.5) * 0.06;
+        cl.x += (Math.random() - 0.5) * 0.2;
+        zap.position.set(0, 1.2, 1.2); zapLevel = Math.random() < 0.5 ? 3 : 0;
+        if (Math.random() < 0.12) fx((F) => F.flash('rgba(90,150,255,.55)'));
+      }
+      cue(e, 'pop', 2.2, () => { sfx('pop'); fx((F) => F.blackout(true)); });
+    }
+  }
+
   function shake(big) { shakeT = big ? 0.8 : 0.35; shakeAmp = big ? 0.12 : 0.04; }
 
   function stare(id) { stareId = id || null; }
 
-  return { init, update, shake, winSweep, tour, stare };
+  return { init, update, shake, winSweep, tour, stare, execute };
 })();

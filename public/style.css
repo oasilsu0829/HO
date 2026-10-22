@@ -299,7 +299,7 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
   position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 60;
   background: var(--void); border: 1px solid var(--rust-hi); color: var(--rust-hi); padding: 10px 16px;
 }
-#modal { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: grid; place-items: center; z-index: 40; }
+#modal { position: fixed; inset: 0; background: rgba(0,0,0,.8); display: grid; place-items: center; z-index: 48; }
 #modalBody { text-align: center; display: flex; flex-direction: column; gap: 14px; min-width: 280px; }
 #modalBody h2 { margin: 0; color: var(--bone); letter-spacing: 4px; }
 
@@ -426,3 +426,7 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
   #banner { font-size: 13px; top: 20%; }
   #stamp { font-size: 36px; }
 }
+
+/* execution cut-to-black */
+#blackout { pointer-events: none; position: fixed; inset: 0; z-index: 47; background: #000; opacity: 0; transition: opacity 1.2s ease-in; }
+#blackout.on { opacity: 1; transition: none; }
