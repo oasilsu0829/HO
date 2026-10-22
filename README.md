@@ -38,3 +38,9 @@ node server.js          # Node 18+ 필요, npm install 필요 없음 (의존성 
 | `public/poker.js` | 게임 엔진 (족보 판정, 베팅, 사이드팟, 봇 AI) — 브라우저/서버 공용 |
 | `public/app.js` | 화면, 연습 모드, 온라인 클라이언트 |
 | `server.js` | 정적 파일 + JSON API + SSE 실시간 전송, 방 저장 |
+
+## 아이패드 / 폰
+
+서버를 켠 PC와 같은 와이파이에서 Safari로 `http://<PC IP>:3000` 접속.
+공유 버튼 → **홈 화면에 추가** 하면 앱처럼 전체화면으로 열립니다.
+(PC IP 확인: Windows `ipconfig`, Mac `ipconfig getifaddr en0`)
