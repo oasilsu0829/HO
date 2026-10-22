@@ -723,9 +723,11 @@ function coreCards(cards, score) {
 // Plain-language reason the winner beat the best losing hand.
 function explain(g) {
   const r = g.result, hands = r.hands;
-  const winIds = new Set(r.winners.map((w) => w.id));
+  // with side pots, the headline is about the main pot; side-pot winners are just the strongest losers here
+  const mainWinners = r.pots > 1 ? r.winners.filter((w) => w.pots?.includes('메인 팟')) : r.winners;
+  const winIds = new Set(mainWinners.map((w) => w.id));
   const nameOf = (id) => esc(g.players.find((p) => p.id === id)?.name || '');
-  const ws = r.winners.filter((w) => hands[w.id]);
+  const ws = mainWinners.filter((w) => hands[w.id]);
   if (!ws.length) return '';
   const losers = Object.keys(hands).filter((id) => !winIds.has(id))
     .sort((a, b) => cmpScore(hands[b].score, hands[a].score));
@@ -735,6 +737,8 @@ function explain(g) {
   const [fs, fn] = Object.entries(suitCount).sort((a, b) => b[1] - a[1])[0] || [];
   if (flushes >= 2 && fn >= 3) notes.push(`보드에 ${SUIT_CH[fs]}가 ${fn}장 → ${SUIT_CH[fs]} ${5 - fn}장만 있어도 플러시`);
   if (r.bluffer) notes.push(`<b>${nameOf(r.bluffer)}</b> 블러핑 들킴!`);
+  for (const f of r.refunds || []) notes.push(`${nameOf(f.id)}: 아무도 콜 못 한 $${fmt(f.amount)} 반환 (승리 아님)`);
+  if (r.pots > 1) for (const w of r.winners.filter((x) => !x.pots.includes('메인 팟'))) notes.push(`${w.pots.join('·')}: <b>${nameOf(w.id)}</b> ${hands[w.id].name} (메인 팟 승자가 올인해서 이 팟엔 못 낌)`);
   const tail = notes.length ? `<br><small>${notes.join(' · ')}</small>` : '';
   if (!losers.length) return `${ws.map((w) => nameOf(w.id)).join(', ')} — 같은 패라서 팟을 나눕니다${tail}`;
   const w = hands[ws[0].id].score, l = hands[losers[0]].score;
@@ -768,6 +772,7 @@ function renderShowdownPanel(g, meId) {
   el.dataset.hand = String(g.handNo);
   const hands = g.result.hands, winIds = new Set(g.result.winners.map((w) => w.id));
   const order = revealOrder(g);
+  const refundOf = (id) => (g.result.refunds || []).find((r) => r.id === id)?.amount || 0;
   const rows = order.map((id, i) => {
     const h = hands[id], p = g.players.find((q) => q.id === id), d = i * REVEAL_PER;
     const core = coreCards(h.cards, h.score);
@@ -775,7 +780,7 @@ function renderShowdownPanel(g, meId) {
     return `<div class="sdrow ${winIds.has(id) ? 'win' : 'lose'} ${id === meId ? 'me' : ''}" style="animation-delay:${d}s">
       <span class="sdname">${esc(p.name)}</span><span class="sdcards">${cards}</span>
       <span class="sdhand" style="animation-delay:${(d + 0.55).toFixed(2)}s">${h.name}</span>
-      <span class="sdtag" style="animation-delay:${(d + 0.8).toFixed(2)}s">${winIds.has(id) ? 'WIN' : ''}</span>
+      <span class="sdtag" style="animation-delay:${(d + 0.8).toFixed(2)}s">${winIds.has(id) ? (g.result.pots > 1 ? `WIN<small>${g.result.winners.find((w) => w.id === id).pots.join('·')}</small>` : 'WIN') : refundOf(id) ? `<small class="refund">반환 $${fmt(refundOf(id))}</small>` : ''}</span>
     </div>`;
   }).join('');
   el.innerHTML = `${rows}<div class="sdwhy" style="animation-delay:${(order.length * REVEAL_PER).toFixed(2)}s">${explain(g)}${deathNote(g)}</div>`;

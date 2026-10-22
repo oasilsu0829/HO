@@ -402,8 +402,13 @@
       prev = lv;
     }
 
-    const won = {};
+    const won = {}, potsWon = {}, refunds = {};
+    const POT_NAMES = ['메인 팟', '사이드 팟', '사이드 팟 2', '사이드 팟 3', '사이드 팟 4', '사이드 팟 5', '사이드 팟 6'];
+    let contested = 0;
     for (const pot of pots) {
+      // a "pot" only one player is in is just their uncalled chips coming back, not a win
+      if (pot.eligible.length === 1) { refunds[pot.eligible[0]] = (refunds[pot.eligible[0]] || 0) + pot.amount; continue; }
+      const potName = POT_NAMES[contested++] || '사이드 팟';
       let best = null, winners = [];
       for (const id of pot.eligible) {
         const c = best ? cmp(hands[id].score, best) : 1;
@@ -417,14 +422,22 @@
         const amt = share + (rem > 0 ? 1 : 0);
         if (rem > 0) rem--;
         won[id] = (won[id] || 0) + amt;
+        (potsWon[id] ||= []).push(potName);
       }
     }
     const winners = [];
     for (const [id, amount] of Object.entries(won)) {
       const p = g.players.find((q) => q.id === id);
       p.chips += amount;
-      winners.push({ id, name: p.name, amount, hand: hands[id].name });
-      log(g, `${p.name} ${hands[id].name}로 승리 (+${amount})`);
+      winners.push({ id, name: p.name, amount, hand: hands[id].name, pots: potsWon[id] });
+      log(g, `${p.name} ${hands[id].name}로 ${contested > 1 ? potsWon[id].join('·') + ' ' : ''}승리 (+${amount})`);
+    }
+    const refundList = [];
+    for (const [id, amount] of Object.entries(refunds)) {
+      const p = g.players.find((q) => q.id === id);
+      p.chips += amount;
+      refundList.push({ id, name: p.name, amount });
+      log(g, `${p.name} 콜 받지 못한 $${amount} 반환`);
     }
     const shown = {};
     for (const p of alive) shown[p.id] = { name: hands[p.id].name, cards: hands[p.id].cards, score: hands[p.id].score };
@@ -432,7 +445,7 @@
     let bluffer = null;
     const la = alive.find((p) => p.id === g.lastAggressor);
     if (la && hands[la.id].score[0] <= 1 && !won[la.id]) { bluffer = la.id; statOf(g, la.id).bluffs++; }
-    g.result = { uncontested: false, winners, hands: shown, pots: pots.length, bluffer };
+    g.result = { uncontested: false, winners, hands: shown, pots: contested, refunds: refundList, bluffer };
     g.pot = 0;
     g.street = 'showdown';
     g.toAct = -1;

@@ -374,8 +374,10 @@ body.tense #dealerMask i { background: var(--rust-hi); box-shadow: 0 0 12px 3px 
 .sdc .card.hole::before { content: ''; position: absolute; left: 50%; bottom: -6px; width: 4px; height: 4px; margin-left: -2px; background: var(--sick); }
 .sdhand { min-width: 96px; color: var(--bone); opacity: 0; animation: pop .4s steps(4) forwards; }
 .sdrow.win .sdhand { color: var(--amber); }
-.sdtag { width: 40px; color: var(--amber); letter-spacing: 2px; opacity: 0; animation: sdStamp .5s cubic-bezier(.2,1.6,.4,1) forwards; }
-.sdrow.lose .sdtag { display: none; }
+.sdtag { min-width: 40px; display: flex; flex-direction: column; align-items: flex-start; color: var(--amber); letter-spacing: 2px; opacity: 0; animation: sdStamp .5s cubic-bezier(.2,1.6,.4,1) forwards; }
+.sdrow.lose .sdtag:empty { display: none; }
+.sdtag small { font-size: 10px; letter-spacing: 0; color: var(--bone); white-space: nowrap; }
+.sdtag small.refund { color: var(--dim); font-size: 11px; }
 .sdwhy { border-top: 1px solid var(--line); padding-top: 6px; color: var(--dim); font-size: 13px; text-align: center; opacity: 0; animation: sdIn .4s ease-out forwards; text-wrap: balance; }
 .sdwhy b { color: var(--bone); font-weight: normal; }
 @keyframes sdIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
