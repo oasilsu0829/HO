@@ -24,6 +24,7 @@ const Scene3D = (() => {
   let tourState = null;      // showdown close-ups
   let stareId = null, stareAmt = 0;
   let lookPoint = null;
+  let hypeT = 0, hypeTier = 0; // result celebration: strobes, stares, gold eyes
   let execs = [];            // running executions
   const deadPose = {};       // playerId -> 'slump' | 'limp' | 'gone'
   const headless = {};       // playerId -> true once their head is gone
@@ -573,8 +574,9 @@ const Scene3D = (() => {
       u.shoulders.position.y = 1.33 + breath * 0.005;
       // glance at whoever is acting (or at me), the actor looks down at their cards
       let yawT = 0;
-      if (lookPoint && !u.turn && !u.out) {
-        const lp = f.worldToLocal(lookPoint.clone());
+      const lp0 = hypeT > 0 && hypeTier >= 6 ? camera.position : lookPoint; // big hands: everyone stares at the camera
+      if (lp0 && !u.turn && !u.out) {
+        const lp = f.worldToLocal(lp0.clone());
         yawT = Math.max(-0.7, Math.min(0.7, Math.atan2(lp.x, lp.z)));
       }
       u.head.rotation.y += (yawT - u.head.rotation.y) * 0.06;
@@ -583,7 +585,9 @@ const Scene3D = (() => {
       // a tell: the head and hands tremble
       u.head.rotation.z = u.shaky ? Math.sin(t / 38) * 0.03 : 0;
       u.head.position.x = u.shaky ? Math.sin(t / 45) * 0.004 : 0;
-      u.eyeMat.opacity += ((u.turn ? 1 : 0) - u.eyeMat.opacity) * 0.15;
+      const goldEyes = hypeT > 0 && hypeTier >= 8;
+      u.eyeMat.color.setHex(goldEyes ? 0xffd34a : 0xd2301f);
+      u.eyeMat.opacity += ((u.turn || goldEyes ? 1 : 0) - u.eyeMat.opacity) * 0.15;
     }
 
     // camera: slight breathing, plus shake, plus the win cinematic
@@ -605,6 +609,11 @@ const Scene3D = (() => {
     if (sweep) stepSweep(dt, cp, cl);
     if (execs.length) stepExecs(dt, cp, cl, t);
     if (particles.length) stepParticles(dt);
+    if (hypeT > 0) {
+      hypeT -= dt;
+      if (hypeTier >= 9) { lampSpike = Math.sin(t / 45) > 0.3 ? 5 : 0; lampBulb.material.color.setHex(0xffe08a); }
+      else if (hypeTier >= 7) lampSpike = Math.random() < 0.08 ? 4 : lampSpike;
+    }
     if (dust) { dust.rotation.y += dt * 0.03; dust.position.y = Math.sin(t / 4000) * 0.05; dust.material.opacity = 0.35 * lampDim; shaft.material.opacity = 0.018 * lampDim * (lamp.intensity > 2 ? 1 : 0.6); shaft.position.x = lamp.position.x; }
     lamp.intensity = lamp.intensity * lampDim + lampSpike;
     if (lampDim < 0.3) lampBulb.material.color.setHex(0x1a1810);
@@ -935,7 +944,9 @@ const Scene3D = (() => {
 
   function stare(id) { stareId = id || null; }
 
+  function hype(tier, secs) { hypeTier = tier; hypeT = secs; }
+
   function setGore(v) { gore = !!v; if (!gore) clearStains(); }
 
-  return { init, update, shake, winSweep, tour, stare, execute, setGore, clearStains };
+  return { init, update, shake, winSweep, tour, stare, execute, setGore, clearStains, hype };
 })();

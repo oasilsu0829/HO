@@ -572,7 +572,18 @@
     return d;
   }
 
-  const api = { PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  // How long the client's result celebration runs for each tier (high card .. royal flush)
+  const CELEB_MS = [900, 1700, 2100, 2400, 2800, 3200, 3600, 4200, 5200, 7600];
+  function celebTier(score) { return score[0] === 8 && score[1] === 14 ? 9 : score[0]; }
+  function bestWin(g) {
+    if (!g.result || g.result.uncontested) return null;
+    let best = null;
+    for (const w of g.result.winners) { const h = g.result.hands[w.id]; if (h && (!best || cmp(h.score, best.h.score) > 0)) best = { w, h }; }
+    return best;
+  }
+  const celebMs = (g) => { const b = bestWin(g); return b ? CELEB_MS[celebTier(b.h.score)] : 0; };
+
+  const api = { CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);

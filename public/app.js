@@ -16,6 +16,7 @@ let mode = null; // 'practice' | 'online'
 // ---------- navigation ----------
 function show(id) {
   if (typeof FX !== 'undefined') FX.blackout(false);
+  if (typeof Celebrate !== 'undefined') Celebrate.stop();
   if (id !== 'table' && typeof Scene3D !== 'undefined' && renderTable.inited) Scene3D.clearStains();
   if (id !== 'table' && typeof FX !== 'undefined') { FX.tense(false); FX.lastSeq = null; FX.lastHand = null; FX.drone(0); }
   document.querySelectorAll('.screen').forEach((s) => (s.hidden = s.id !== id));
@@ -227,6 +228,8 @@ const FX = {
         const iWasIn = me.inHand && !me.folded;
         const delay = g.result?.uncontested ? 0 : Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 300;
         const busted = bustedIn(g);
+        const celeb = Poker.celebMs(g);
+        if (celeb) setTimeout(() => Celebrate.play(g), delay);
         setTimeout(() => {
           if (typeof Scene3D !== 'undefined') {
             if (busted.some((p) => p.id === me.id)) {
@@ -239,7 +242,7 @@ const FX = {
           }
           const after = busted.length ? 3300 + (busted.length - 1) * 400 : 0;
           setTimeout(() => this.payout(g, me, winners, iWon, iWasIn, big), after);
-        }, delay);
+        }, delay + celeb);
         break;
       }
     }
@@ -271,6 +274,161 @@ const syncSound = () => ($('#btnSound').textContent = FX.on ? '소리 ON' : '소
 $('#btnSound').onclick = () => { FX.on = !FX.on; store.set('ho.sound', FX.on); if (!FX.on) FX.tense(false); syncSound(); };
 syncSound();
 syncGore();
+
+// ---------- result celebrations: tidy for a pair, unhinged for a royal ----------
+const NOTE = (i) => 523.25 * Math.pow(2, [0, 2, 4, 7, 9][((i % 5) + 5) % 5] / 12 + Math.floor(i / 5)); // C-major pentatonic, i=0 is C5
+const Celebrate = {
+  parts: [], raf: 0, cv: null, x: null, timers: [],
+  xylo(i, at = 0, vol = 0.35) { // a bright wooden "tok": fundamental + inharmonic partial, very fast decay
+    this.timers.push(setTimeout(() => {
+      const ac = FX.audio(); if (!ac) return;
+      const f = NOTE(i), t = ac.currentTime;
+      for (const [mult, v, dec] of [[1, vol, 0.45], [3.98, vol * 0.35, 0.12], [9.1, vol * 0.12, 0.05]]) {
+        const o = ac.createOscillator(), g = ac.createGain();
+        o.type = mult === 1 ? 'triangle' : 'sine'; o.frequency.value = f * mult;
+        g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.0008, t + dec);
+        o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dec + 0.02);
+      }
+    }, at));
+  },
+  run(seq, step, base = 0, vol) { seq.forEach((n, k) => n != null && this.xylo(n, base + k * step, vol)); },
+  later(fn, at) { this.timers.push(setTimeout(fn, at)); },
+  // ---- pixel particles ----
+  spawn(kind, n, opt = {}) {
+    const W = this.cv.width, H = this.cv.height;
+    for (let i = 0; i < n; i++) {
+      const p = { kind, x: opt.x ?? Math.random() * W, y: opt.y ?? -10 - Math.random() * H * 0.3, vx: (Math.random() - 0.5) * (opt.spread ?? 1.5), vy: opt.vy ?? (0.6 + Math.random() * 1.6), life: opt.life ?? 240, g: opt.g ?? 0.04, size: opt.size ?? 3, col: opt.col, ch: opt.ch, rot: Math.random() * 6 };
+      if (opt.burst) { const a = Math.random() * 6.28, s = 0.8 + Math.random() * (opt.burst); p.vx = Math.cos(a) * s; p.vy = Math.sin(a) * s; }
+      this.parts.push(p);
+    }
+    if (!this.raf) this.raf = requestAnimationFrame(() => this.tick());
+  },
+  tick() {
+    const { x, cv } = this; x.clearRect(0, 0, cv.width, cv.height);
+    this.parts = this.parts.filter((p) => {
+      p.vy += p.g; p.x += p.vx; p.y += p.vy; p.life--; p.rot += 0.1;
+      if (p.kind === 'firework' && p.life <= 0) { this.spawn('spark', 40, { x: p.x, y: p.y, burst: 2.6, g: 0.03, life: 70, col: p.col, size: 2 }); return false; }
+      if (p.life <= 0 || p.y > cv.height + 20) return false;
+      const a = Math.min(1, p.life / 40); x.globalAlpha = a;
+      if (p.kind === 'suit') { x.fillStyle = p.col; x.font = `${p.size * 5}px monospace`; x.fillText(p.ch, p.x | 0, p.y | 0); }
+      else if (p.kind === 'coin') { const w = Math.max(1, Math.abs(Math.cos(p.rot)) * p.size * 2) | 0; x.fillStyle = '#b5830f'; x.fillRect((p.x - w / 2) | 0, p.y | 0, w, p.size * 2); x.fillStyle = '#ffd84a'; x.fillRect((p.x - w / 2) | 0, p.y | 0, Math.max(1, w - 1), p.size * 2 - 1); }
+      else if (p.kind === 'confetti') { x.fillStyle = p.col; x.fillRect(p.x | 0, p.y | 0, Math.max(1, Math.abs(Math.sin(p.rot)) * p.size * 2) | 0, p.size); }
+      else { x.fillStyle = p.col || '#ffe08a'; x.fillRect(p.x | 0, p.y | 0, p.size, p.size); }
+      return true;
+    });
+    x.globalAlpha = 1;
+    this.raf = this.parts.length ? requestAnimationFrame(() => this.tick()) : 0;
+  },
+  stop() {
+    this.timers.forEach(clearTimeout); this.timers = [];
+    this.parts = []; const el = $('#celeb'); if (el) { el.hidden = true; el.className = ''; }
+  },
+
+  // returns how long it runs (ms), from the shared table so the server waits the same
+  play(g) {
+    const best = Poker.bestWin(g);
+    if (!best) return 0;
+    this.stop();
+    const tier = Poker.celebTier(best.h.score);
+    const ms = Poker.CELEB_MS ? Poker.CELEB_MS[tier] : Poker.celebMs(g);
+    const el = $('#celeb');
+    this.cv = $('#celebFx'); this.x = this.cv.getContext('2d');
+    this.cv.width = Math.round(innerWidth / 4); this.cv.height = Math.round(innerHeight / 4); // chunky pixels
+    const cards = best.h.cards;
+    const core = coreCards(cards, best.h.score);
+    const order = tier === 9 ? cards.slice().sort((a, b) => '23456789TJQKA'.indexOf(a[0]) - '23456789TJQKA'.indexOf(b[0])) : cards;
+    const NAMES = ['HIGH CARD', 'ONE PAIR', 'TWO PAIR', 'THREE OF A KIND', 'STRAIGHT', 'FLUSH', 'FULL HOUSE', 'FOUR OF A KIND', 'STRAIGHT FLUSH', 'ROYAL FLUSH'];
+    const ko = tier === 9 ? '로 열 플 러 시' : best.h.name;
+    const who = esc(best.w.name);
+    el.className = `t${tier}`; el.hidden = false;
+    el.style.setProperty('--dur', ms + 'ms');
+    const title = tier >= 7
+      ? `<span class="big" data-t="${NAMES[tier]}">${NAMES[tier].split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('')}</span><span class="ko">${ko}</span>`
+      : `<span class="big">${NAMES[tier].split('').map((c, i) => `<i style="--i:${i}">${c === ' ' ? '&nbsp;' : c}</i>`).join('')}</span><span class="ko">${ko}</span>`;
+    el.querySelector('.ctitle').innerHTML = tier === 0 ? `<span class="ko">${ko}</span>` : title;
+    el.querySelector('.csub').innerHTML = `${who} · +$${fmt(best.w.amount)}`;
+    el.querySelector('.ccards').innerHTML = tier === 0 ? '' : order.map((c, i) => `<span class="cc ${core.has(c) ? 'core' : 'kick'}" style="--i:${i}">${cardHTML(c, 'lg')}</span>`).join('');
+    // restart CSS animations
+    el.querySelectorAll('*').forEach((n) => { n.style.animation = 'none'; void n.offsetWidth; n.style.animation = ''; });
+
+    const S = typeof Scene3D !== 'undefined' ? Scene3D : null;
+    const coreIdx = order.map((c, i) => (core.has(c) ? i : -1)).filter((i) => i >= 0);
+    const suitCol = { s: '#e8e2c8', c: '#9fc28a', h: '#ff4a3a', d: '#ff8a3a' };
+    switch (tier) {
+      case 0: this.xylo(2, 80, 0.2); break;
+      case 1: // tidy: two clean hops
+        this.run([0, 1, 2, 3, 4].map((k) => 4 + k), 70, 0, 0.12);
+        coreIdx.forEach((i, k) => this.xylo(9 + k * 2, 650 + k * 180));
+        break;
+      case 2:
+        this.run([4, 5, 6, 7, 8], 60, 0, 0.12);
+        coreIdx.forEach((i, k) => this.xylo(7 + k, 600 + k * 140));
+        this.later(() => this.run([10, 12], 120), 1250);
+        break;
+      case 3:
+        this.run([3, 4, 5, 6, 7], 55, 0, 0.12);
+        coreIdx.forEach((i, k) => this.later(() => { this.xylo(5 + k * 2, 0, 0.45); FX.sfx('thud'); FX.shake(false); }, 600 + k * 260));
+        this.later(() => this.run([10, 11, 12, 15], 70), 1450);
+        break;
+      case 4: // a run up the scale as each card lights
+        order.forEach((c, k) => this.xylo(5 + k, 500 + k * 130, 0.4));
+        this.later(() => { this.run([10, 12, 14, 15, 17], 55); S && S.shake(false); }, 1250);
+        this.later(() => this.spawn('spark', 30, { y: this.cv.height * 0.45, vy: -1.5, spread: 3, col: '#ffe08a' }), 1250);
+        break;
+      case 5: { // suit rain
+        const s = cards[0][1];
+        this.run([5, 7, 9, 10, 12, 14, 15, 17], 60);
+        this.spawn('suit', 70, { ch: SUIT_CH[s], col: suitCol[s], size: 3 });
+        this.later(() => this.spawn('suit', 50, { ch: SUIT_CH[s], col: suitCol[s], size: 4 }), 700);
+        this.later(() => this.run([15, 14, 12, 15, 17, 20], 80), 1500);
+        break;
+      }
+      case 6: // coins fountain, big stamp
+        FX.flash('rgba(0,0,0,.6)');
+        this.run([5, 7, 10, 12, 15], 90);
+        this.later(() => { FX.shake(true); FX.sfx('raise'); this.spawn('coin', 90, { x: this.cv.width / 2, y: this.cv.height * 0.55, vy: -3.2, spread: 3.2, g: 0.07, size: 3 }); this.run([15, 17, 20, 17, 20, 22], 70); }, 900);
+        this.later(() => this.spawn('coin', 60, { x: this.cv.width / 2, y: this.cv.height * 0.55, vy: -2.6, spread: 4, g: 0.07 }), 1800);
+        S && S.hype(6, ms / 1000);
+        break;
+      case 7: // lights out, four slams with thunder
+        FX.blackout(true); this.later(() => FX.blackout(false), 450);
+        S && S.hype(7, ms / 1000);
+        coreIdx.forEach((i, k) => this.later(() => { this.xylo(0 + k * 2, 0, 0.6); FX.sfx('clunk'); FX.flash('rgba(210,48,31,.45)'); FX.shake(k === coreIdx.length - 1); }, 700 + k * 330));
+        this.later(() => { this.run([10, 12, 15, 17, 20, 22, 25], 55); this.spawn('spark', 120, { x: this.cv.width / 2, y: this.cv.height * 0.45, burst: 3.5, g: 0.05, col: '#ff8a3a' }); }, 2100);
+        break;
+      case 8: // glitch, rainbow, everything
+        S && S.hype(8, ms / 1000);
+        FX.sfx('raise');
+        order.forEach((c, k) => this.xylo(5 + k * 2, 300 + k * 110, 0.45));
+        this.later(() => { FX.shake(true); FX.flash('rgba(255,255,255,.7)'); this.run([10, 12, 14, 15, 17, 19, 20, 22, 24, 25], 45); }, 1000);
+        for (let k = 0; k < 4; k++) this.later(() => { this.spawn('coin', 40, { x: Math.random() * this.cv.width, y: this.cv.height, vy: -4, spread: 2, g: 0.08 }); this.spawn('spark', 50, { x: Math.random() * this.cv.width, y: this.cv.height * 0.4, burst: 3, col: ['#ff4a3a', '#ffd84a', '#5fd4ff', '#9fff7a'][k] }); this.run([20, 22, 25], 60, 0, 0.25); }, 1200 + k * 600);
+        break;
+      case 9: { // royal flush: silence, spotlight, gold rising one card at a time, then chaos
+        S && S.hype(9, (ms - 1500) / 1000);
+        FX.blackout(true); FX.tense(false); FX.drone(0);
+        this.later(() => FX.blackout(false), 900);
+        order.forEach((c, k) => this.later(() => { this.xylo(5 + k * 2, 0, 0.55); this.xylo(10 + k * 2, 60, 0.3); this.spawn('spark', 16, { x: this.cv.width * (0.3 + k * 0.1), y: this.cv.height * 0.5, burst: 1.6, col: '#ffd84a', life: 50 }); }, 1100 + k * 380));
+        this.later(() => {
+          FX.flash('rgba(255,230,140,.95)'); FX.shake(true); FX.sfx('blast');
+          this.run([10, 12, 14, 15, 17, 19, 20, 22, 24, 25, 27, 29, 30], 40, 0, 0.4);
+          this.spawn('confetti', 160, { col: undefined }); this.parts.slice(-160).forEach((p) => (p.col = ['#ffd84a', '#ff4a3a', '#e8e2c8', '#5fd4ff', '#9fff7a'][(Math.random() * 5) | 0]));
+        }, 3100);
+        for (let k = 0; k < 7; k++) this.later(() => {
+          const W = this.cv.width, H = this.cv.height;
+          this.parts.push({ kind: 'firework', x: W * (0.15 + Math.random() * 0.7), y: H, vx: (Math.random() - 0.5) * 0.6, vy: -3.6 - Math.random(), g: 0.05, life: 40 + (Math.random() * 15 | 0), size: 2, col: ['#ffd84a', '#ff4a3a', '#5fd4ff', '#9fff7a', '#ff8adf'][k % 5] });
+          if (!this.raf) this.raf = requestAnimationFrame(() => this.tick());
+          this.run([15 + (k % 3), 20, 25], 70, 300, 0.25); // jackpot bell
+          if (k % 2) FX.shake(false);
+        }, 3300 + k * 520);
+        this.later(() => this.spawn('suit', 90, { ch: '♠', col: '#ffd84a', size: 4 }), 4200);
+        this.later(() => this.run([25, 24, 22, 20, 22, 25, 30], 90, 0, 0.45), 6200);
+        break;
+      }
+    }
+    this.later(() => { el.hidden = true; el.className = ''; }, ms);
+    return ms;
+  },
+};
 
 // ---------- rendering ----------
 function cardHTML(c, size = '', extra = '') {
@@ -583,7 +741,7 @@ const Practice = {
       const alive = g.players.filter((p) => p.chips > 0);
       // let the reveal and the shot play before any popup covers the table
       const execMs = bustedIn(g).length ? EXEC_MS + 1800 : 0;
-      const revealMs = (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500) + execMs;
+      const revealMs = (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500) + execMs + Poker.celebMs(g);
       if (g.mode === 'death') {
         const wait = (key, fn) => { if (!this[key]) { this[key] = true; this.timer = setTimeout(() => this.tick(), revealMs); return true; } this[key] = false; fn(); return true; };
         if (g.champion) return wait('winShown', () => {
@@ -611,12 +769,13 @@ const Practice = {
         return modal('<h2>🏆 우승!</h2><p>모든 봇을 이겼습니다!</p>', [['메뉴로', 'orange', () => show('menu')]]);
       }
       const reveal = g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 : 0;
-      this.timer = setTimeout(() => this.next(), 5000 + reveal + (bustedIn(g).length ? EXEC_MS : 0));
+      this.timer = setTimeout(() => this.next(), 5000 + reveal + Poker.celebMs(g) + (bustedIn(g).length ? EXEC_MS : 0));
     }
   },
   next() {
     clearTimeout(this.timer);
     FX.blackout(false);
+    Celebrate.stop();
     Poker.startHand(this.g);
     this.tick();
   },
@@ -650,8 +809,27 @@ const Preview = {
         ...EXECUTIONS.map((m) => mk(EXEC_NAMES[m], 'red', () => this.run(m), this.busy)),
         mk(this.pov === 'me' ? '시점: 1인칭' : '시점: 지켜보기', 'blue', () => { this.pov = this.pov === 'me' ? 'them' : 'me'; this.render(); }, this.busy),
         mk('테이블 청소', 'gray', () => Scene3D.clearStains(), this.busy),
+        mk('결산 연출 ▶', 'orange', () => this.celebAll(), this.busy),
       ],
     });
+  },
+  // fake a showdown for each tier, one after another
+  celebAll() {
+    const HANDS = [['As', 'Jd', '8c', '6h', '3s', '2d', '9c'], ['Ah', 'Ad', 'Kc', '9s', '5h', '3d', '2c'], ['Kh', 'Kd', '7c', '7s', 'Ah', '3d', '2c'], ['Qh', 'Qd', 'Qs', '9c', '5h', '3d', '2c'],
+      ['9h', '8d', '7c', '6s', '5h', '2d', 'Kc'], ['Ah', 'Jh', '8h', '5h', '2h', 'Kd', '3c'], ['Kh', 'Kd', 'Kc', '7s', '7h', '3d', '2c'], ['9h', '9d', '9c', '9s', '5h', '3d', '2c'],
+      ['9s', '8s', '7s', '6s', '5s', '2d', 'Kc'], ['As', 'Ks', 'Qs', 'Js', 'Ts', '2d', '3c']];
+    this.busy = true; this.render();
+    let at = 0;
+    HANDS.forEach((seven, tier) => {
+      setTimeout(() => {
+        if (mode !== 'preview') return;
+        const h = Poker.bestHand(seven);
+        const fake = { result: { uncontested: false, winners: [{ id: 'victim', name: '희생양', amount: 100 * (tier + 1) * (tier + 1) }], hands: { victim: { name: h.name, cards: h.cards, score: h.score } } } };
+        Celebrate.play(fake);
+      }, at);
+      at += Poker.CELEB_MS[tier] + 400;
+    });
+    setTimeout(() => { this.busy = false; if (mode === 'preview') this.render(); }, at);
   },
   run(method) {
     if (this.busy) return;
@@ -729,7 +907,7 @@ const Online = {
     if (v.game.champion && this.champShown !== v.game.handNo) {
       this.champShown = v.game.handNo;
       const champ = v.game.players.find((p) => p.id === v.game.champion);
-      const wait = v.game.result && !v.game.result.uncontested ? Object.keys(v.game.result.hands).length * REVEAL_PER * 1000 + EXEC_MS + 2600 : EXEC_MS + 1500;
+      const wait = (v.game.result && !v.game.result.uncontested ? Object.keys(v.game.result.hands).length * REVEAL_PER * 1000 + EXEC_MS + 2600 : EXEC_MS + 1500) + Poker.celebMs(v.game);
       setTimeout(() => modal(v.game.champion === v.me ? '<h2>🏆 최후의 1인</h2><p>모두를 묻고 살아남았습니다.</p>' : `<h2>☠ 게임 종료</h2><p><b>${esc(champ?.name || '')}</b>이(가) 최후의 1인입니다.</p>`, [['확인', 'orange']]), wait);
     }
     const me = v.game.players.find((p) => p.id === v.me);
