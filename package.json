@@ -5,6 +5,7 @@
   "description": "친구끼리 하는 도트 스타일 텍사스 홀덤",
   "scripts": {
     "start": "node server.js",
+    "build": "echo \"no build step\"",
     "dev:cf": "wrangler dev",
     "deploy": "wrangler deploy"
   },
