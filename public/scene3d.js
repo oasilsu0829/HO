@@ -300,7 +300,7 @@ const Scene3D = (() => {
       if (!f) { f = makeFigure(p.id); scene.add(f); figures.set(p.id, f); f.position.copy(s.figure); }
       // busted and not yet seen dying (e.g. after a reload): just slumped
       if (p.chips === 0 && !p.inHand && !deadPose[p.id]) deadPose[p.id] = 'slump';
-      if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; delete headless[p.id]; f.visible = true; f.userData.head.visible = true; f.userData.head.material.forEach((m, i) => m.color.setHex(i === 4 ? 0xffffff : 0x8a8370)); f.rotation.x = 0; f.rotation.z = 0; }
+      if (p.chips > 0 && deadPose[p.id] && !f.userData.exec) { delete deadPose[p.id]; delete headless[p.id]; f.visible = true; f.userData.head.visible = true; f.userData.head.material.forEach((m, i) => m.color.setHex(i === 4 ? 0xffffff : 0x8a8370)); f.rotation.x = 0; f.rotation.z = 0; f.position.copy(s.figure); }
       f.userData.target = s.figure; f.rotation.y = s.yaw;
       f.userData.turn = g.players[g.toAct]?.id === p.id;
       f.userData.out = (p.folded && g.street !== 'waiting') || (p.chips === 0 && !p.inHand);

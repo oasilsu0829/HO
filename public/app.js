@@ -584,6 +584,48 @@ const Practice = {
 };
 $('#btnPracticeStart').onclick = () => Practice.start();
 
+// ---------- execution preview: an empty table and a victim, nothing at stake ----------
+const EXEC_NAMES = { shotgun: '샷건', drop: '바닥 꺼짐', lightsout: '소등', electric: '전기의자' };
+const Preview = {
+  g: null, pov: 'them', busy: false,
+  enter() {
+    mode = 'preview';
+    const g = Poker.createGame({});
+    Poker.addPlayer(g, { id: 'me', name: store.get(NAME_KEY) || '나' });
+    Poker.addPlayer(g, { id: 'victim', name: '희생양', bot: true });
+    this.g = g;
+    show('table');
+    $('#roomInfo').innerHTML = '<b>처형 미리보기</b><span class="wide-only"> · 아무것도 걸려있지 않아요</span>';
+    $('#hostCtl').innerHTML = '';
+    this.render();
+  },
+  render() {
+    const mk = (label, cls, fn, disabled) => { const b = document.createElement('button'); b.className = `btn ${cls}`; b.textContent = label; b.onclick = fn; b.disabled = !!disabled; return b; };
+    renderTable({
+      game: Poker.viewFor(this.g, 'me'), me: 'me', legal: null,
+      waitingMsg: this.busy ? '…' : `처형 방식을 고르세요 · 시점: <b>${this.pov === 'me' ? '1인칭 (내가 당함)' : '지켜보기'}</b>`,
+      extraButtons: () => [
+        ...EXECUTIONS.map((m) => mk(EXEC_NAMES[m], 'red', () => this.run(m), this.busy)),
+        mk(this.pov === 'me' ? '시점: 1인칭' : '시점: 지켜보기', 'blue', () => { this.pov = this.pov === 'me' ? 'them' : 'me'; this.render(); }, this.busy),
+        mk('테이블 청소', 'gray', () => Scene3D.clearStains(), this.busy),
+      ],
+    });
+  },
+  run(method) {
+    if (this.busy) return;
+    this.busy = true; this.render();
+    FX.audio(); // the click unlocks sound on phones
+    const me = this.pov === 'me';
+    Scene3D.execute(me ? 'me' : 'victim', method, me);
+    setTimeout(() => {
+      FX.blackout(false);
+      this.busy = false;
+      if (mode === 'preview') this.render(); // brings the victim back for another go
+    }, me ? 6200 : 3800);
+  },
+};
+$('#btnPreview').onclick = () => Preview.enter();
+
 // ---------- online mode ----------
 async function api(path, body) {
   const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : undefined);
@@ -673,7 +715,7 @@ const Online = {
   },
 };
 
-$('#btnExit').onclick = () => (mode === 'online' ? Online.exit() : Practice.exit());
+$('#btnExit').onclick = () => (mode === 'online' ? Online.exit() : mode === 'preview' ? show('menu') : Practice.exit());
 
 // auto-resume an online seat after a refresh
 const saved = store.get(ONLINE_KEY);
