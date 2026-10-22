@@ -582,8 +582,24 @@
     return best;
   }
   const celebMs = (g) => { const b = bestWin(g); return b ? CELEB_MS[celebTier(b.h.score)] : 0; };
+  // A close call: the top two hands share a rank, so it comes down to the kickers.
+  function duelInfo(g) {
+    const b = bestWin(g);
+    if (!b) return null;
+    const hands = g.result.hands, winIds = new Set(g.result.winners.map((w) => w.id));
+    const tiedWinner = g.result.winners.find((w) => w.id !== b.w.id && hands[w.id] && cmp(hands[w.id].score, b.h.score) === 0);
+    let rid = tiedWinner?.id;
+    if (!rid) for (const id of Object.keys(hands)) if (!winIds.has(id) && (!rid || cmp(hands[id].score, hands[rid].score) > 0)) rid = id;
+    if (!rid || hands[rid].score[0] !== b.h.score[0]) return null;
+    const ws = b.h.score, ls = hands[rid].score;
+    let depth = 1; while (depth < ws.length && ws[depth] === ls[depth]) depth++;
+    const tie = depth >= ws.length;
+    return { wid: b.w.id, lid: rid, depth: Math.min(depth, ws.length - 1), steps: ws.length - 1, tie };
+  }
+  const DUEL_STEP = 750;
+  const duelMs = (g) => { const d = duelInfo(g); return d ? 1300 + (d.depth) * DUEL_STEP + 1300 : 0; };
 
-  const api = { CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  const api = { duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);
