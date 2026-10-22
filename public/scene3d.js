@@ -477,6 +477,7 @@ const Scene3D = (() => {
     // hole cards
     g.players.forEach((p, pi) => {
       const s = seatPos[p.id];
+      if (s.me) return; // my two cards live in the HUD only; no second copy on the felt
       p.hole.forEach((c, i) => {
         const m = cardMesh(`h${g.handNo}-${p.id}-${i}`);
         const d = pi * 0.06 + i * 0.25;
