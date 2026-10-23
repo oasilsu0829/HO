@@ -8,6 +8,7 @@ const Scene3D = (() => {
   const SUIT = { s: '♠', h: '♥', d: '♦', c: '♣' };
   const SUIT_COL = { s: '#111111', c: '#111111', h: '#b3150d', d: '#b3150d' };
 
+  let rail = null;
   let renderer, scene, camera, lamp, lampBulb, root, labelsEl, tableGroup, ambient;
   const camBase = new THREE.Vector3(0, 1.5, 1.55);
   const camLook = new THREE.Vector3(0, 0.95, -0.55);
@@ -133,7 +134,7 @@ const Scene3D = (() => {
       const leg = new THREE.Mesh(new THREE.BoxGeometry(0.08, TABLE_Y, 0.08), rimMat); leg.position.set(x, TABLE_Y / 2, z); tableGroup.add(leg);
     }
     // a low rail the community cards lean on
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.05), rimMat);
+    rail = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.04, 0.05), rimMat);
     rail.position.set(0, TABLE_Y + 0.02, -0.18); rail.castShadow = true; tableGroup.add(rail);
     // the deck
     const deck = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.05, 0.24), [0, 0, 0, 0, 0, 0].map((_, i) => new THREE.MeshLambertMaterial(i === 2 ? { map: cardTex('??') } : { color: 0x9b9274 })));
@@ -448,6 +449,7 @@ const Scene3D = (() => {
     for (const m of cards.values()) m.userData.seen = false;
     for (const s of chips.values()) s.userData.seen = false;
     seatPos = layout(g.players, ctx.me);
+    if (rail) rail.visible = g.variant !== 'three'; // no board in three-card poker
     const reveal = new Set();
     if (g.street === 'showdown' && g.result) for (const w of g.result.winners) for (const c of g.result.hands?.[w.id]?.cards || []) reveal.add(c);
 
@@ -487,7 +489,7 @@ const Scene3D = (() => {
           if (p.folded) pos.lerp(new THREE.Vector3(0, TABLE_Y + 0.002, -0.45), 0.6);
           setCard(m, '??', pos, -Math.PI / 2, 0, (0.5 - i) * 0.1, d);
         } else {
-          const side = new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)).multiplyScalar((i - 0.5) * 0.12);
+          const side = new THREE.Vector3(Math.cos(s.yaw), 0, -Math.sin(s.yaw)).multiplyScalar((i - (p.hole.length - 1) / 2) * 0.12);
           const pos = s.cards.clone().add(side); pos.y = TABLE_Y + 0.003 + i * 0.002;
           if (p.folded) pos.lerp(new THREE.Vector3(0, TABLE_Y + 0.002, -0.45), 0.6);
           const shown = c !== '??';

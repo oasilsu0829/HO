@@ -277,3 +277,66 @@ test('an all-in runout deals one street at a time and nobody can act during it',
   assert.deepStrictEqual(seen, [2, 3, 4, 5, 5]);
   assert.strictEqual(g.street, 'showdown');
 });
+
+// ---------- three-card poker ----------
+function ref3(cards) { // brute-force reference: category from first principles, ranked like hold'em
+  const v = cards.map(val).sort((a, b) => b - a);
+  const suited = new Set(cards.map((c) => c[1])).size === 1;
+  const distinct = new Set(v).size;
+  const run = distinct === 3 && (v[0] - v[2] === 2 || (v[0] === 14 && v[1] === 3 && v[2] === 2));
+  const high = v[0] === 14 && v[1] === 3 ? 3 : v[0];
+  if (run && suited) return [8, high, 3];
+  if (suited) return [5, ...v];
+  if (run) return [4, high];
+  if (distinct === 1) return [3, v[0]];
+  if (distinct === 2) { const pair = v[0] === v[1] ? v[0] : v[1]; return [1, pair, v.find((x) => x !== pair)]; }
+  return [0, ...v];
+}
+
+test('three-card hands match the reference for every one of the 22,100 possible hands', () => {
+  let n = 0;
+  for (let a = 0; a < 52; a++) for (let b = a + 1; b < 52; b++) for (let c = b + 1; c < 52; c++) {
+    const h = [DECK[a], DECK[b], DECK[c]];
+    assert.deepStrictEqual(P.eval3(h), ref3(h), h.join(' ')); n++;
+  }
+  assert.strictEqual(n, 22100);
+  const s = (h) => P.eval3(h.split(' '));
+  assert.ok(P.cmp(s('Qh Jh Th'), s('Ad 9d 4d')) > 0);  // straight flush > flush
+  assert.ok(P.cmp(s('Ad 9d 4d'), s('9c 8d 7h')) > 0);  // flush > straight (hold'em order)
+  assert.ok(P.cmp(s('9c 8d 7h'), s('8s 8h 8d')) > 0);  // straight > trips (hold'em order)
+  assert.ok(P.cmp(s('4c 3d 2h'), s('Ac 2d 3h')) > 0);  // A-2-3 is the lowest straight
+  assert.deepStrictEqual(P.hand3('Ac 2d 3h'.split(' ')).cards, ['3h', '2d', 'Ac']);
+});
+
+test('three-card duels: payouts match the reference and chips are conserved over 10,000 hands', () => {
+  for (let t = 0; t < 10000; t++) {
+    const g = P.createGame({ variant: 'three', sb: 5, bb: 10, startChips: 1000 });
+    P.addPlayer(g, { id: 'a', name: 'A' }); P.addPlayer(g, { id: 'b', name: 'B' });
+    for (const p of g.players) p.chips = 10 + Math.floor(Math.random() * 120) * 5 + (Math.random() < 0.3 ? 3 : 0);
+    g.dealer = Math.floor(Math.random() * 2) - 1;
+    P.startHand(g);
+    g.players.forEach((p, i) => (p.idx = i));
+    assert.ok(g.players.every((p) => p.hole.length === 3));
+    const before = g.players.map((p) => p.chips + p.total);
+    while (P.isLive(g)) { if (g.runout) { P.runoutStep(g); continue; } const p = g.players[g.toAct]; assert.ok(P.applyAction(g, p.id, randomAction(g, p.id)).ok); }
+    assert.strictEqual(g.board.length, 0, 'three-card poker never deals a board');
+    // reference payout using the three-card reference evaluator
+    const live = g.players.filter((p) => p.inHand && !p.folded);
+    const n = 2, left = g.players.map((p) => p.total), pay = [0, 0];
+    const sc = g.players.map((p) => (p.inHand && !p.folded ? ref3(p.hole) : null));
+    for (;;) {
+      const alive = [0, 1].filter((i) => sc[i] && left[i] > 0);
+      if (!alive.length) break;
+      const m = Math.min(...alive.map((i) => left[i])); let pot = 0;
+      for (let i = 0; i < n; i++) { const take = Math.min(left[i], m); pot += take; left[i] -= take; }
+      let winners = alive;
+      if (alive.length === 2) { const c = cmp(sc[0], sc[1]); winners = c > 0 ? [0] : c < 0 ? [1] : [0, 1]; }
+      const order = winners.slice().sort((x, y) => ((x - g.dealer + 1) % 2) - ((y - g.dealer + 1) % 2));
+      const share = Math.floor(pot / winners.length); let odd = pot - share * winners.length;
+      for (const i of order) { pay[i] += share + (odd > 0 ? 1 : 0); if (odd > 0) odd--; }
+    }
+    const rest = left.reduce((a, b) => a + b, 0); if (rest) pay[live.length === 1 ? g.players.indexOf(live[0]) : 0] += rest;
+    assert.deepStrictEqual(g.players.map((p) => p.chips), g.players.map((p, i) => before[i] - p.total + pay[i]), g.log.join(' | '));
+    assert.strictEqual(g.players[0].chips + g.players[1].chips, before[0] + before[1]);
+  }
+});

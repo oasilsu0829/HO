@@ -83,7 +83,8 @@ function createHub(persist, initialRooms = {}) {
   }
 
   function seatPlayer(room, name) {
-    if (room.game.players.length >= 8) throw new Error('방이 꽉 찼습니다 (최대 8명)');
+    const cap = room.game.variant === 'three' ? 2 : 8;
+    if (room.game.players.length >= cap) throw new Error(`방이 꽉 찼습니다 (최대 ${cap}명)`);
     const pid = newId(4), token = newId(16);
     const p = P.addPlayer(room.game, { id: pid, name: cleanName(name) });
     if (P.isLive(room.game)) { p.inHand = false; p.folded = true; } // joins next hand
@@ -94,14 +95,14 @@ function createHub(persist, initialRooms = {}) {
 
   const api = {
     'GET /api/rooms': () => Object.values(rooms).map((r) => ({
-      id: r.id, name: r.name, players: r.game.players.length, running: r.running, blinds: `${r.game.sb}/${r.game.bb}`, mode: r.game.mode,
+      id: r.id, name: r.name, players: r.game.players.length, running: r.running, blinds: `${r.game.sb}/${r.game.bb}`, mode: r.game.mode, variant: r.game.variant,
     })),
     'POST /api/create': (b) => {
       const id = roomCode();
       const bb = clampInt(b.bb, 2, 100000, 20);
       const room = {
         id, name: String(b.roomName || '').trim().slice(0, 20) || `${cleanName(b.name)}의 방`,
-        game: P.createGame({ mode: b.mode, sb: Math.floor(bb / 2), bb, startChips: clampInt(b.chips, bb * 10, 10000000, 1000) }),
+        game: P.createGame({ variant: b.variant, mode: b.variant === 'three' ? 'normal' : b.mode, sb: Math.floor(bb / 2), bb, startChips: clampInt(b.chips, bb * 10, 10000000, 1000) }),
         tokens: {}, running: false, hostId: null,
       };
       rooms[id] = room;
@@ -128,7 +129,7 @@ function createHub(persist, initialRooms = {}) {
       const { room, pid } = auth(b);
       if (pid !== room.hostId) throw new Error('방장만 시작할 수 있습니다');
       const g = room.game;
-      if (g.mode === 'death' && g.champion) {
+      if (g.champion) {
         // a fresh deathmatch with everyone at the table
         for (const p of g.players) { p.dead = false; p.spectator = false; p.chips = g.startChips; }
         Object.assign(g, { round: 1, roundHand: 0, champion: null, resetPending: false, street: 'waiting', result: null, board: [], handNo: 0 });
@@ -149,7 +150,7 @@ function createHub(persist, initialRooms = {}) {
       const { room, pid } = auth(b);
       if (room.game.mode === 'death' && room.game.handNo > 0 && !room.game.champion) throw new Error('데스매치 도중에는 봇을 추가할 수 없습니다');
       if (pid !== room.hostId) throw new Error('방장만 봇을 추가할 수 있습니다');
-      if (room.game.players.length >= 8) throw new Error('방이 꽉 찼습니다');
+      if (room.game.players.length >= (room.game.variant === 'three' ? 2 : 8)) throw new Error('방이 꽉 찼습니다');
       const n = room.game.players.filter((p) => p.bot).length + 1;
       const p = P.addPlayer(room.game, { id: 'bot' + newId(3), name: `봇${n}`, bot: true });
       if (P.isLive(room.game)) { p.inHand = false; p.folded = true; }
@@ -168,6 +169,7 @@ function createHub(persist, initialRooms = {}) {
       const { room, pid } = auth(b);
       const p = room.game.players.find((q) => q.id === pid);
       if (room.game.mode === 'death') throw new Error('데스매치에는 리바이가 없습니다');
+      if (room.game.variant === 'three') throw new Error('3장 포커는 끝장 승부라 리바이가 없습니다');
       if (p.chips > 0 || (P.isLive(room.game) && p.inHand)) throw new Error('칩이 남아있을 때는 리바이할 수 없습니다');
       p.chips = room.game.startChips;
       p.rebuys = (p.rebuys || 0) + 1;

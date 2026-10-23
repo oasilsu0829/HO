@@ -39,6 +39,7 @@
   <div class="panel form">
     <h2>연습 모드</h2>
     <label>닉네임 <input id="pName" maxlength="12"></label>
+    <label>게임 <select id="pGame"><option value="holdem">텍사스 홀덤</option><option value="three">3장 포커 (1:1)</option></select></label>
     <label>모드 <select id="pMode"><option value="normal">일반</option><option value="death">☠ 데스매치</option></select></label>
     <p class="modehint" id="pModeHint"></p>
     <label>봇 수 <select id="pBots"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option></select></label>
@@ -60,6 +61,7 @@
       <div>
         <h3>방 만들기</h3>
         <label>방 이름 <input id="oRoomName" maxlength="20" placeholder="(선택)"></label>
+        <label>게임 <select id="oGame"><option value="holdem">텍사스 홀덤</option><option value="three">3장 포커 (1:1)</option></select></label>
         <label>모드 <select id="oMode"><option value="normal">일반</option><option value="death">☠ 데스매치</option></select></label>
         <label>시작 칩 <input id="oChips" type="number" value="1000" step="100"></label>
         <label>빅 블라인드 <input id="oBB" type="number" value="20" step="2"></label>
@@ -82,6 +84,8 @@
   <div class="panel form wide">
     <h2>족보 (높은 순)</h2>
     <ol id="rankList"></ol>
+    <h3>3장 포커 (1:1)</h3>
+    <ol id="rankList3"></ol>
     <div class="row"><button class="btn gray" data-go="menu">뒤로</button></div>
   </div>
 </section>

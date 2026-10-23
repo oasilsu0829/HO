@@ -93,12 +93,35 @@
   function sortFive(cards, score) {
     const cnt = {};
     for (const c of cards) cnt[rv(c)] = (cnt[rv(c)] || 0) + 1;
-    const key = (c) => (score && (score[0] === 4 || score[0] === 8) && score[1] === 5 && rv(c) === 14 ? 1 : rv(c));
+    const wheelHigh = cards.length === 3 ? 3 : 5;
+    const key = (c) => (score && (score[0] === 4 || score[0] === 8) && score[1] === wheelHigh && rv(c) === 14 ? 1 : rv(c));
     return cards.slice().sort((a, b) => cnt[rv(b)] - cnt[rv(a)] || key(b) - key(a) || 'shdc'.indexOf(a[1]) - 'shdc'.indexOf(b[1]));
   }
 
+  // Three-card hands, ranked in the same order as hold'em (no quads or full houses with 3 cards):
+  // straight flush > flush > straight > trips > pair > high card. A-2-3 counts as a 3-high straight.
+  function eval3(cards) {
+    const v = cards.map(rv).sort((a, b) => b - a);
+    const flush = cards.every((c) => c[1] === cards[0][1]);
+    let sh = 0;
+    if (new Set(v).size === 3) { if (v[0] - v[2] === 2) sh = v[0]; else if (v[0] === 14 && v[1] === 3 && v[2] === 2) sh = 3; }
+    if (sh && flush) return [8, sh, 3]; // the trailing 3 marks a three-card hand (never a "royal")
+    if (flush) return [5, ...v];
+    if (sh) return [4, sh];
+    if (v[0] === v[2]) return [3, v[0]];
+    if (v[0] === v[1]) return [1, v[0], v[2]];
+    if (v[1] === v[2]) return [1, v[1], v[0]];
+    return [0, ...v];
+  }
+  function hand3(cards) {
+    const score = eval3(cards);
+    return { score, cards: sortFive(cards, score), name: handName(score) };
+  }
+  // the hand a player holds in this game's variant
+  const handFor = (g, hole) => (g.variant === 'three' ? hand3(hole) : bestHand(hole.concat(g.board)));
+
   function handName(score) {
-    if (score[0] === 8 && score[1] === 14) return '로열 스트레이트 플러시';
+    if (score[0] === 8 && score[1] === 14 && score.length === 2) return '로열 스트레이트 플러시';
     return HAND_NAMES[score[0]];
   }
 
@@ -106,6 +129,7 @@
   function createGame(opts = {}) {
     return {
       mode: opts.mode === 'death' ? 'death' : 'normal',
+      variant: opts.variant === 'three' ? 'three' : 'holdem', // 'three': heads-up three-card poker, one betting round
       roundLen: 8,      // death mode: hands per round
       round: 1,
       roundHand: 0,
@@ -246,7 +270,8 @@
     }
     put(g, g.players[sbI], g.sb); g.players[sbI].lastAction = 'SB';
     put(g, g.players[bbI], g.bb); g.players[bbI].lastAction = 'BB';
-    for (let r = 0; r < 2; r++) for (const p of g.players) if (p.inHand) p.hole.push(g.deck.pop());
+    const holeCount = g.variant === 'three' ? 3 : 2;
+    for (let r = 0; r < holeCount; r++) for (const p of g.players) if (p.inHand) p.hole.push(g.deck.pop());
     g.currentBet = g.bb;
     g.fullRaiseSeq = 1; // bumps on every full raise; an all-in short of a full raise doesn't
     for (const p of g.players) p.actedSeq = 0;
@@ -349,7 +374,7 @@
     g.currentBet = 0;
     g.minRaise = g.bb;
     g.aggressor = null;
-    if (g.street === 'river') return showdown(g);
+    if (g.street === 'river' || g.variant === 'three') return showdown(g); // three-card: one round, straight to showdown
     dealNext(g);
     if (g.players.filter(canAct).length >= 2) {
       g.toAct = nextIdx(g, g.dealer, canAct);
@@ -387,10 +412,18 @@
     g.street = 'showdown';
     g.toAct = -1;
     deathCheck(g);
+    headsUpEnd(g);
   }
 
   // Death mode: whoever busts dies at once and ends the round; otherwise the
   // shortest stack dies after the round's last hand. Last one alive wins.
+  // three-card is a duel to the end: once a player is broke the other is the champion
+  function headsUpEnd(g) {
+    if (g.variant !== 'three') return;
+    const left = g.players.filter((p) => p.chips > 0 && !p.leaving);
+    if (left.length === 1 && g.players.length >= 2) { g.champion = left[0].id; log(g, `🏆 ${left[0].name} 승리`); }
+  }
+
   function deathCheck(g) {
     if (g.mode !== 'death') return;
     g.roundHand++;
@@ -419,7 +452,7 @@
   function showdown(g) {
     const alive = g.players.filter((p) => p.inHand && !p.folded);
     const hands = {};
-    for (const p of alive) hands[p.id] = bestHand(p.hole.concat(g.board));
+    for (const p of alive) hands[p.id] = handFor(g, p.hole);
 
     // build side pots from total contributions
     const levels = [...new Set(g.players.filter((p) => p.total > 0).map((p) => p.total))].sort((a, b) => a - b);
@@ -483,6 +516,7 @@
     g.street = 'showdown';
     g.toAct = -1;
     deathCheck(g);
+    headsUpEnd(g);
   }
 
   function seatDist(g, id) {
@@ -547,6 +581,20 @@
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
   // Returns { type, amount?, think (ms), say?, tell? }.
+  function equity3(hole, opps, sims) {
+    const known = new Set(hole), rest = [];
+    for (const r of RANKS) for (const s2 of SUITS) if (!known.has(r + s2)) rest.push(r + s2);
+    const mine = eval3(hole);
+    let score = 0;
+    for (let n = 0; n < sims; n++) {
+      for (let i = 0; i < opps * 3; i++) { const j = i + Math.floor(Math.random() * (rest.length - i)); [rest[i], rest[j]] = [rest[j], rest[i]]; }
+      let win = true, tie = 0;
+      for (let o = 0; o < opps; o++) { const c = cmp(mine, eval3(rest.slice(o * 3, o * 3 + 3))); if (c < 0) { win = false; break; } if (c === 0) tie++; }
+      if (win) score += tie ? 1 / (tie + 1) : 1;
+    }
+    return score / sims;
+  }
+
   function botDecide(g, id) {
     const L = legal(g, id);
     if (!L) return null;
@@ -554,7 +602,7 @@
     const P = personaOf(p);
     const opps = g.players.filter((q) => q.inHand && !q.folded && q !== p);
     const n = Math.max(1, opps.length);
-    const eq = equity(p.hole, g.board, n, 220);
+    const eq = g.variant === 'three' ? equity3(p.hole, n, 600) : equity(p.hole, g.board, n, 220);
     const fair = 1 / (n + 1);
     const strength = clamp((eq - fair) / (1 - fair), -1, 1); // 0 = average hand here, 1 = the nuts
     const r = Math.random();
@@ -631,7 +679,7 @@
 
   // How long the client's result celebration runs for each tier (high card .. royal flush)
   const CELEB_MS = [800, 1900, 2300, 2700, 3200, 3700, 4200, 5000, 5800, 8400];
-  function celebTier(score) { return score[0] === 8 && score[1] === 14 ? 9 : score[0]; }
+  function celebTier(score) { return score[0] === 8 && score[1] === 14 && score.length === 2 ? 9 : score[0]; }
   function bestWin(g) {
     if (!g.result || g.result.uncontested) return null;
     let best = null;
@@ -656,7 +704,7 @@
   const DUEL_STEP = 520, DUEL_INTRO = 900;
   const duelMs = (g) => { const d = duelInfo(g); return d ? DUEL_INTRO + d.depth * DUEL_STEP + 900 : 0; };
 
-  const api = { DUEL_INTRO, runoutStep, randInt, newDeck, sortFive, cmp, duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
+  const api = { eval3, hand3, handFor, DUEL_INTRO, runoutStep, randInt, newDeck, sortFive, cmp, duelInfo, duelMs, DUEL_STEP, CELEB_MS, celebTier, bestWin, celebMs, PERSONAS, personaOf, createGame, addPlayer, removePlayer, startHand, applyAction, legal, viewFor, botDecide, bestHand, isLive, RANKS, SUITS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Poker = api;
 })(typeof window !== 'undefined' ? window : globalThis);

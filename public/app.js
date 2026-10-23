@@ -69,6 +69,8 @@ const RANK_EXAMPLES = [
   ['원페어', ['Ts', 'Td', 'Ah', '7c', '3s']],
   ['하이카드', ['Ah', 'Jd', '9c', '6s', '3h']],
 ];
+$('#rankList3').innerHTML = [['스트레이트 플러시', ['Qh', 'Jh', 'Th']], ['플러시', ['Ad', '9d', '4d']], ['스트레이트', ['9c', '8d', '7h']], ['트리플', ['8s', '8h', '8d']], ['원페어', ['Ks', 'Kd', '4h']], ['하이카드', ['Ah', 'Jd', '6c']]]
+  .map(([n, cs]) => `<li><span class="nm">${n}</span>${cs.map((c) => cardHTML(c, 'sm')).join('')}</li>`).join('') + '<li style="opacity:.7">A-2-3도 스트레이트 · 같은 족보면 높은 카드부터 비교</li>';
 $('#rankList').innerHTML = RANK_EXAMPLES.map(([n, cs]) => `<li><span class="nm">${n}</span>${cs.map((c) => cardHTML(c, 'sm')).join('')}</li>`).join('');
 
 
@@ -218,7 +220,7 @@ const FX = {
       // shuffle, then a flick for every card dealt
       Sfx.riffle(0);
       const n = g.players.filter((p) => p.inHand).length;
-      for (let i = 0; i < n * 2; i++) Sfx.flick(0.75 + i * 0.07, 0.25);
+      for (let i = 0; i < n * (g.variant === 'three' ? 3 : 2); i++) Sfx.flick(0.75 + i * 0.07, 0.25);
       this.lastBoard = 0;
     }
     // new board cards: flip each, with a sting on the late streets if I'm still in
@@ -866,7 +868,8 @@ function renderTable(ctx) {
     const alive = g.players.filter((p) => !p.dead).length;
     const handTxt = !Poker.isLive(g) && g.result?.deaths ? '라운드 종료' : `핸드 ${hr || 0}/${g.roundLen}${last ? ' 마지막!' : ''}`;
     $('#street').innerHTML = `<span class="dm">☠ R${g.round}</span> · <span class="${last ? 'dm-last' : ''}">${handTxt}</span> · 생존 ${alive} · ${STREET_KO[g.street]}`;
-  } else $('#street').textContent = `${STREET_KO[g.street]} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
+  } else if (g.variant === 'three') $('#street').textContent = `3장 포커 · 1:1 · ${g.street === 'showdown' ? '쇼다운' : g.street === 'waiting' ? '대기 중' : '베팅'} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
+  else $('#street').textContent = `${STREET_KO[g.street]} · 블라인드 ${g.sb}/${g.bb}${g.handNo ? ` · #${g.handNo}` : ''}`;
 
   const banner = $('#banner');
   renderShowdownPanel(g, ctx.me);
@@ -899,7 +902,7 @@ function renderActions(ctx) {
   const g = ctx.game, L = ctx.legal, box = $('#actions');
   const me = g.players.find((p) => p.id === ctx.me);
   let mine = '';
-  if (me && me.hole.length && me.hole[0] !== '??' && g.board.length >= 2 && !me.folded) mine = `내 패: <b>${Poker.bestHand(me.hole.concat(g.board)).name}</b>`;
+  if (me && me.hole.length && me.hole[0] !== '??' && (g.board.length >= 2 || g.variant === 'three') && !me.folded) mine = `내 패: <b>${Poker.handFor(g, me.hole).name}</b>`;
   if (!L) {
     raiseDraft = null;
     let msg = '';
@@ -972,10 +975,11 @@ const Practice = {
     const name = $('#pName').value.trim() || '나';
     store.set(NAME_KEY, name);
     const bb = Math.max(2, parseInt($('#pBB').value, 10) || 20);
-    const g = Poker.createGame({ mode: $('#pMode').value, sb: Math.floor(bb / 2), bb, startChips: Math.max(bb * 10, parseInt($('#pChips').value, 10) || 1000) });
+    const three = $('#pGame').value === 'three';
+    const g = Poker.createGame({ variant: $('#pGame').value, mode: three ? 'normal' : $('#pMode').value, sb: Math.floor(bb / 2), bb, startChips: Math.max(bb * 10, parseInt($('#pChips').value, 10) || 1000) });
     Poker.addPlayer(g, { id: 'me', name });
     const names = ['조커', '지미', '루시', '마크', '에디', '샤샤', '토니'];
-    const nb = parseInt($('#pBots').value, 10);
+    const nb = three ? 1 : parseInt($('#pBots').value, 10);
     for (let i = 0; i < nb; i++) Poker.addPlayer(g, { id: 'bot' + i, name: names[i], bot: true });
     this.g = g;
     Poker.startHand(g);
@@ -1024,6 +1028,13 @@ const Practice = {
       // let the reveal and the shot play before any popup covers the table
       const execMs = bustedIn(g).length ? EXEC_MS + 1800 : 0;
       const revealMs = (g.result && !g.result.uncontested ? Object.keys(g.result.hands).length * REVEAL_PER * 1000 + 2600 : 1500) + execMs + Poker.celebMs(g) + Poker.duelMs(g);
+      if (g.variant === 'three' && g.champion) {
+        if (!this.winShown) { this.winShown = true; this.timer = setTimeout(() => this.tick(), revealMs); return; }
+        this.winShown = false;
+        store.del(PRACTICE_KEY);
+        return modal(g.champion === 'me' ? '<h2>🏆 승리</h2><p>상대를 끝장냈습니다.</p>' : '<h2>☠ 패배</h2><p>칩을 모두 잃고 처형당했습니다.</p>',
+          [['메뉴로', 'gray', () => show('menu')], ['다시 하기', 'orange', () => this.start()]]);
+      }
       if (g.mode === 'death') {
         const wait = (key, fn) => { if (!this[key]) { this[key] = true; this.timer = setTimeout(() => this.tick(), revealMs); return true; } this[key] = false; fn(); return true; };
         if (g.champion) return wait('winShown', () => {
@@ -1064,6 +1075,15 @@ const Practice = {
   exit() { clearTimeout(this.timer); this.save(); show('menu'); },
 };
 $('#btnPracticeStart').onclick = () => Practice.start();
+const THREE_HINT = '각자 3장, 베팅 한 번에 승부. 족보: 스티플 > 플러시 > 스트레이트 > 트리플 > 페어 > 하이카드. 한쪽이 파산하면 끝.';
+function syncGameSelect(game, bots, modeSel, hint) {
+  const three = $(game).value === 'three';
+  if (bots) { $(bots).disabled = three; if (three) $(bots).value = '1'; }
+  $(modeSel).disabled = three; if (three) $(modeSel).value = 'normal';
+  if (hint) $(hint).textContent = three ? THREE_HINT : $(modeSel).value === 'death' ? DM_HINT : '';
+}
+$('#pGame').addEventListener('change', () => syncGameSelect('#pGame', '#pBots', '#pMode', '#pModeHint'));
+$('#oGame').addEventListener('change', () => { syncGameSelect('#oGame', null, '#oMode'); if ($('#oGame').value === 'three') toast('3장 포커: ' + THREE_HINT); });
 const DM_HINT = '8핸드마다 칩이 가장 적은 사람이 처형됩니다. 파산하면 그 자리에서 처형되고 다음 라운드로. 라운드마다 칩은 리셋, 최후의 1인까지.';
 for (const id of ['pMode', 'oMode']) $('#' + id).addEventListener('change', (e) => { $('#pModeHint').textContent = $('#pMode').value === 'death' ? DM_HINT : ''; if (e.target.value === 'death') toast('☠ ' + DM_HINT); });
 
@@ -1162,7 +1182,7 @@ async function loadRooms() {
   try {
     const list = await api('/api/rooms');
     $('#roomList').innerHTML = list.length
-      ? list.map((r) => `<li data-room="${r.id}"><span><span class="code">${r.id}</span> ${esc(r.name)}</span><span>${r.mode === 'death' ? '☠ ' : ''}${r.players}/8 · ${r.blinds}${r.running ? ' · 진행중' : ''}</span></li>`).join('')
+      ? list.map((r) => `<li data-room="${r.id}"><span><span class="code">${r.id}</span> ${esc(r.name)}</span><span>${r.variant === 'three' ? '3장 · ' : ''}${r.mode === 'death' ? '☠ ' : ''}${r.players}/${r.variant === 'three' ? 2 : 8} · ${r.blinds}${r.running ? ' · 진행중' : ''}</span></li>`).join('')
       : '<li style="cursor:default;opacity:.6">열린 방이 없습니다</li>';
     $('#roomList').querySelectorAll('[data-room]').forEach((li) => (li.onclick = () => { $('#oCode').value = li.dataset.room; join(); }));
   } catch { $('#roomList').innerHTML = '<li style="cursor:default;opacity:.6">서버에 연결할 수 없습니다 (node server.js 실행 필요)</li>'; }
@@ -1172,7 +1192,7 @@ const oName = () => { const n = $('#oName').value.trim(); if (n) store.set(NAME_
 $('#btnCreate').onclick = async () => {
   if (!oName()) return toast('닉네임을 입력하세요');
   try {
-    const s = await api('/api/create', { name: oName(), mode: $('#oMode').value, roomName: $('#oRoomName').value, chips: $('#oChips').value, bb: $('#oBB').value });
+    const s = await api('/api/create', { name: oName(), variant: $('#oGame').value, mode: $('#oMode').value, roomName: $('#oRoomName').value, chips: $('#oChips').value, bb: $('#oBB').value });
     Online.connect(s);
   } catch (e) { toast(e.message); }
 };
@@ -1230,7 +1250,7 @@ const Online = {
       onKick: (id) => modal('<h2>내보낼까요?</h2>', [['취소', 'gray'], ['내보내기', 'red', () => this.call('/api/kick', { target: id })]]),
       waitingMsg: v.game.champion ? `🏆 <b>${esc(v.game.players.find((p) => p.id === v.game.champion)?.name || '')}</b> 최후의 1인${isHost ? ' · [새 게임]으로 다시' : ''}` : isHost ? `친구에게 방 코드 <b>${v.room.id}</b>를 알려주고 [게임 시작]을 누르세요` : '방장이 게임을 시작하길 기다리는 중…',
       showdownMsg: v.room.running ? '5초 후 다음 핸드…' : '일시정지됨 (방장이 재개하면 계속)',
-      extraButtons: () => (v.game.mode !== 'death' && me.chips === 0 && !(Poker.isLive(v.game) && me.inHand)
+      extraButtons: () => (v.game.mode !== 'death' && v.game.variant !== 'three' && me.chips === 0 && !(Poker.isLive(v.game) && me.inHand)
         ? [mk('리바이', 'orange', () => this.call('/api/rebuy'))] : []),
     });
   },
